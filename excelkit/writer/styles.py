@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, List, Sequence, Tuple, TypeVar
 
-from ..style import Alignment, Border, DEFAULT_STYLE, Fill, Font, Side, Style
+from ..style import Alignment, Border, BorderSide, DEFAULT_STYLE, Fill, Font, Style
 
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _BUILTIN_NUMBER_FORMATS = {

@@ -79,7 +79,7 @@ class Workbook:
     def _rename_sheet(self, worksheet: Worksheet, name: str) -> None:
         """功能：验证新名称并原子更新工作表名称索引。
 
-        使用方法：仅由 ``worksheet.label = new_label`` 属性设置器调用。
+        使用方法：仅由 ``worksheet.name = new_name`` 属性设置器调用。
         参数：``worksheet`` 为当前工作簿中的工作表；``name`` 为新名称字符串。
         返回：``None``；成功后名称查询立即使用新名称，工作表顺序保持不变。
         异常：工作表不属于当前工作簿时抛出 ``ValueError``；名称无效时抛出
@@ -89,15 +89,15 @@ class Workbook:
         if worksheet not in self._sheets:
             raise ValueError("工作表不属于当前工作簿")
         self._validate_sheet_name(name)
-        if worksheet.label == name:
+        if worksheet.name == name:
             return
         normalized_name = name.casefold()
         existing = self._sheets_by_name.get(normalized_name)
         if existing is not None and existing is not worksheet:
             raise ValueError(f"Worksheet already exists: {name!r}")
-        old_name = worksheet.label
+        old_name = worksheet.name
         self._sheets_by_name.pop(old_name.casefold())
-        worksheet._label = name
+        worksheet._name = name
         self._sheets_by_name[normalized_name] = worksheet
 
     def sheet(self, name: Union[str, int]) -> Worksheet:
@@ -133,7 +133,7 @@ class Workbook:
         """
         worksheet = self.sheet(name_or_index)
         self._sheets.remove(worksheet)
-        self._sheets_by_name.pop(worksheet.label.casefold())
+        self._sheets_by_name.pop(worksheet.name.casefold())
         return self
 
     def move_sheet(self, name_or_index: Union[str, int], index: int) -> "Workbook":
@@ -178,7 +178,7 @@ class Workbook:
             "page": deepcopy(source._page),
         }
         target = self.add_sheet(new_name)
-        target._label_color = source._label_color
+        target._color = source._color
         target._values._values = copied_state["values"]
         target._formulas = copied_state["formulas"]
         target._styles = copied_state["styles"]
@@ -265,7 +265,7 @@ class Workbook:
         self,
         data: Optional[Mapping[str, Any]] = None,
         *,
-        by_sheet: Optional[
+        sheet_data: Optional[
             Mapping[Union[str, int], Mapping[str, Any]]
         ] = None,
         strict: bool = False,
@@ -273,10 +273,10 @@ class Workbook:
         """功能：使用公共及分工作表数据替换模板标签并展开循环行块。
 
         使用方法：``workbook.render(data)`` 使用一份公共数据渲染全部工作表；
-        ``workbook.render(data, by_sheet={"明细": local})`` 只渲染指定工作表，
+        ``workbook.render(data, sheet_data={"明细": local})`` 只渲染指定工作表，
         并让工作表数据覆盖同名公共字段。
         参数：``data`` 为所有目标工作表共享的根映射，``None`` 等价于空映射；
-        ``by_sheet`` 为以工作表名称或0-based索引为键、独立根映射为值的映射；
+        ``sheet_data`` 为以工作表名称或0-based索引为键、独立根映射为值的映射；
         ``strict`` 默认为 ``False``，缺失标签按空值处理，为 ``True`` 时立即报错。
         返回：当前 :class:`Workbook`，支持链式调用。
         异常：参数、工作表标识或独立数据无效时抛出 ``TypeError``、``KeyError``、
@@ -286,7 +286,7 @@ class Workbook:
         from ..template import render_workbook
 
         return render_workbook(
-            self, data, by_sheet=by_sheet, strict=strict
+            self, data, sheet_data=sheet_data, strict=strict
         )
 
     def __len__(self) -> int:

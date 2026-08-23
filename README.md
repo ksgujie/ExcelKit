@@ -1,14 +1,14 @@
-# ExcelKit 0.2.3
+# ExcelKit 0.3.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.2.3 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.3.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.2.3-py3-none-any.whl
+pip install excelkit-0.3.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -59,7 +59,7 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `sheets`：按创建顺序返回工作表 tuple。
 - `active`：返回第一张工作表；空工作簿会创建 `Sheet1`。
 - `Workbook.load(filename)`：读取 XLS、XLSX、XLSM、XLTX、CSV 或 TSV。
-- `render(data=None, *, by_sheet=None, strict=False)`：使用公共或分工作表数据
+- `render(data=None, *, sheet_data=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
 - `save(filename)`：只按 `.xlsx` 或 `.xls` 扩展名保存并返回当前工作簿；其他
   扩展名抛出 `InvalidFileError`。
@@ -74,12 +74,12 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `append_rows(rows)`：原子校验并连续追加二维数据。
 - `values`：返回从 A1 到已触及边界的全部普通值二维列表。
 - `max_row`、`max_column`：已经触及的最大 0-based 索引；空表为 `-1`。
-- `label`：读取或设置工作表标签名称；设置时同步 Workbook 名称索引。
-- `label_color`：读取、设置或清除工作表标签颜色。
+- `name`：读取或设置工作表名称；设置时同步 Workbook 名称索引。
+- `color`：读取、设置或清除工作表标签颜色。
 - `row(index)`、`column(index)`：设置 0-based 行高、列宽和隐藏状态。
 - `merged_ranges`：返回全部合并区域的只读 tuple。
-- `freeze`：设置冻结后的第一个可滚动 A1 单元格，`None` 清除。
-- `filter_range`：设置或清除连续自动筛选区域。
+- `freeze_panes`：设置冻结后的第一个可滚动 A1 单元格，`None` 清除。
+- `auto_filter_range`：设置或清除连续自动筛选区域。
 - `show_gridlines`：控制屏幕网格线。
 - `page`：页面布局与打印设置唯一入口。
 
@@ -88,11 +88,11 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 工作表名称和标签颜色使用普通属性设置：
 
 ```python
-worksheet.label = "销售明细"
-worksheet.label_color = "4472C4"
+worksheet.name = "销售明细"
+worksheet.color = "4472C4"
 
 assert workbook.sheet("销售明细") is worksheet
-assert worksheet.label_color == "FF4472C4"
+assert worksheet.color == "FF4472C4"
 ```
 
 标签颜色可在 XLSX 中保存和读取；旧版 XLS 写出后端不支持标签颜色。
@@ -138,7 +138,8 @@ from excelkit.address import (
     column_to_index,
     index_to_column,
     cell_index,
-    parse_range,
+    range_index,
+    range_address,
     cell_address,
 )
 
@@ -146,7 +147,8 @@ assert column_to_index("A") == 0
 assert column_to_index("AA") == 26
 assert index_to_column(26) == "AA"
 assert cell_index("C8") == (7, 2)
-assert parse_range("B3:D8") == (2, 1, 7, 3)
+assert range_index("B3:D8") == (2, 1, 7, 3)
+assert range_address(2, 1, 7, 3) == "B3:D8"
 assert cell_address(7, 2) == "C8"
 ```
 
@@ -213,13 +215,17 @@ assert worksheet["A1"].value == "123"
 ## 单元格样式
 
 ```python
-from excelkit import Alignment, Border, Fill, Font, Side, Style
+from excelkit.style import Alignment, Border, BorderSide, Fill, Font, Style
 
 worksheet["A1"].style = Style(
     font=Font(name="微软雅黑", size=12, bold=True, color="FFFFFF"),
     fill=Fill("4472C4"),
-    border=Border(bottom=Side("thin", "000000")),
-    alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+    border=Border(bottom=BorderSide(Border.THIN, "000000")),
+    alignment=Alignment(
+        horizontal=Alignment.HORIZONTAL_CENTER,
+        vertical=Alignment.VERTICAL_CENTER,
+        wrap_text=True,
+    ),
     number_format="0.00",
 )
 ```
@@ -280,7 +286,7 @@ Workbook.load("report_template.xlsx").render({
 workbook = Workbook.load("multi_sheet_template.xlsx")
 workbook.render(
     {"company": "示例公司", "created_at": "#2026-8-1 12:33"},
-    by_sheet={
+    sheet_data={
         "封面": {"title": "销售报表"},
         "销售明细": {"items": [...]},
         2: {"total": 1000},  # 0-based工作表索引。
@@ -288,7 +294,7 @@ workbook.render(
 ).save("multi_sheet_result.xlsx")
 ```
 
-使用 `by_sheet` 时只渲染其中列出的工作表，其他表保持不变；所有目标表原子提交，
+使用 `sheet_data` 时只渲染其中列出的工作表，其他表保持不变；所有目标表原子提交，
 任意一张失败都不会留下部分渲染结果。
 
 - 循环体必须用集合名称作为前缀，如 `{items.name}`；`{name}` 始终指根数据。
@@ -305,20 +311,20 @@ workbook.render(
 ## 工作表布局与打印
 
 ```python
-from excelkit import HeaderFooter, PageMargins
+from excelkit.page_setup import HeaderFooter, PageMargins
 
 worksheet.range("A1:F1").merge()
 worksheet.row(0).height = 28
 worksheet.column(1).width = 24
-worksheet.freeze = "A3"
-worksheet.filter_range = "A2:F100"
+worksheet.freeze_panes = "A3"
+worksheet.auto_filter_range = "A2:F100"
 worksheet.show_gridlines = False
 
 page = worksheet.page
 page.orientation = "landscape"
 page.paper_size = "A4"
 page.fit(width=1)            # 一页宽，高度不限。
-page.area = "A1:F100"
+page.print_area = "A1:F100"
 page.repeat_rows = (0, 1)   # 0-based，包含结束行。
 page.margins = PageMargins(left=1.5, right=1.5, top=2, bottom=2)
 page.header = HeaderFooter(center="销售报表", right="&D")
@@ -351,7 +357,7 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.2.3 能力边界
+## 0.3.0 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存、区域批量写入、基础样式、模板

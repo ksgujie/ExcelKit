@@ -9,7 +9,8 @@ from excelkit.address import (
     index_to_column,
     cell_address,
     cell_index,
-    parse_range,
+    range_index,
+    range_address,
 )
 from excelkit.errors import ExcelKitError, InvalidAddressError
 
@@ -40,7 +41,8 @@ class AddressTests(unittest.TestCase):
         self.assertEqual(cell_index("A1"), (0, 0))
         self.assertEqual(cell_index("C8"), (7, 2))
         self.assertEqual(cell_index("XFD1048576"), (MAX_ROW - 1, MAX_COLUMN - 1))
-        self.assertEqual(parse_range("B3:D8"), (2, 1, 7, 3))
+        self.assertEqual(range_index("B3:D8"), (2, 1, 7, 3))
+        self.assertEqual(range_address(2, 1, 7, 3), "B3:D8")
 
     def test_cell_address_uses_row_then_column(self):
         """功能：验证地址生成参数使用先行后列的 0-based 顺序。
@@ -65,7 +67,7 @@ class AddressTests(unittest.TestCase):
                 cell_index(address)
         for address in ("A1", "B2:A1", "A2:B1", "A1:"):
             with self.subTest(address=address), self.assertRaises(InvalidAddressError):
-                parse_range(address)
+                range_index(address)
         for index in (-1, MAX_COLUMN, True, 1.0):
             with self.subTest(index=index), self.assertRaises(InvalidAddressError):
                 index_to_column(index)
@@ -85,10 +87,10 @@ class AddressTests(unittest.TestCase):
             "column_letter_to_index",
             "column_index_to_letter",
             "parse_cell_address",
-            "parse_range_address",
             "format_cell_address",
             "parse_cell",
             "make_cell_address",
+            "parse_range",
         ):
             self.assertFalse(hasattr(address, name))
 

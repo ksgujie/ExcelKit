@@ -7,7 +7,8 @@ from excelkit.address import (
     index_to_column,
     cell_address,
     cell_index,
-    parse_range,
+    range_index,
+    range_address,
 )
 
 
@@ -23,7 +24,8 @@ def main() -> None:
     print("AA 的 0-based 列索引：", column_to_index("AA"))
     print("列索引 26 的列字母：", index_to_column(26))
     print("C8 的行列索引：", cell_index("C8"))
-    print("B3:D8 的边界：", parse_range("B3:D8"))
+    print("B3:D8 的边界：", range_index("B3:D8"))
+    print("边界转地址：", range_address(2, 1, 7, 3))
     print("行索引 7、列索引 2 的地址：", cell_address(7, 2))
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import ClassVar, Optional
 
 _COLOR_PATTERN = re.compile(r"^[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$")
 _BORDER_STYLES = {
@@ -103,7 +103,7 @@ class Fill:
 
 
 @dataclass(frozen=True)
-class Side:
+class BorderSide:
     """边框的一条边；包含线型和可选颜色。"""
 
     style: Optional[str] = None
@@ -112,7 +112,7 @@ class Side:
     def __post_init__(self) -> None:
         """功能：验证边框线型并规范化颜色。
 
-        使用方法：创建 ``Side(style="thin", color="000000")`` 时自动调用。
+        使用方法：创建 ``BorderSide(style=Border.THIN, color="000000")`` 时自动调用。
         参数：``style`` 为受支持 Excel 线型或 ``None``；``color`` 为颜色或
         ``None``。
         返回：``None``。
@@ -125,29 +125,57 @@ class Side:
 
 @dataclass(frozen=True)
 class Border:
-    """由左、右、上、下四条不可变 Side 组成的单元格边框。"""
+    """由左、右、上、下四条不可变 BorderSide 组成的单元格边框。"""
 
-    left: Side = field(default_factory=Side)
-    right: Side = field(default_factory=Side)
-    top: Side = field(default_factory=Side)
-    bottom: Side = field(default_factory=Side)
+    THIN: ClassVar[str] = "thin"
+    MEDIUM: ClassVar[str] = "medium"
+    THICK: ClassVar[str] = "thick"
+    DASHED: ClassVar[str] = "dashed"
+    DOTTED: ClassVar[str] = "dotted"
+    DOUBLE: ClassVar[str] = "double"
+    HAIR: ClassVar[str] = "hair"
+    DASH_DOT: ClassVar[str] = "dashDot"
+    DASH_DOT_DOT: ClassVar[str] = "dashDotDot"
+    MEDIUM_DASHED: ClassVar[str] = "mediumDashed"
+    MEDIUM_DASH_DOT: ClassVar[str] = "mediumDashDot"
+    MEDIUM_DASH_DOT_DOT: ClassVar[str] = "mediumDashDotDot"
+    SLANT_DASH_DOT: ClassVar[str] = "slantDashDot"
+
+    left: BorderSide = field(default_factory=BorderSide)
+    right: BorderSide = field(default_factory=BorderSide)
+    top: BorderSide = field(default_factory=BorderSide)
+    bottom: BorderSide = field(default_factory=BorderSide)
 
     def __post_init__(self) -> None:
-        """功能：验证四个边框字段均为 Side。
+        """功能：验证四个边框字段均为 BorderSide。
 
         使用方法：创建 ``Border(...)`` 时自动调用。
-        参数：``left``、``right``、``top``、``bottom`` 为 :class:`Side`。
+        参数：``left``、``right``、``top``、``bottom`` 为 :class:`BorderSide`。
         返回：``None``。
         异常：任一字段类型错误时抛出 ``TypeError``。
         """
         for field_name in ("left", "right", "top", "bottom"):
-            if not isinstance(getattr(self, field_name), Side):
-                raise TypeError(f"边框字段 {field_name} 必须是 Side")
+            if not isinstance(getattr(self, field_name), BorderSide):
+                raise TypeError(f"边框字段 {field_name} 必须是 BorderSide")
 
 
 @dataclass(frozen=True)
 class Alignment:
     """水平、垂直对齐及自动换行设置。"""
+
+    HORIZONTAL_GENERAL: ClassVar[str] = "general"
+    HORIZONTAL_LEFT: ClassVar[str] = "left"
+    HORIZONTAL_CENTER: ClassVar[str] = "center"
+    HORIZONTAL_RIGHT: ClassVar[str] = "right"
+    HORIZONTAL_FILL: ClassVar[str] = "fill"
+    HORIZONTAL_JUSTIFY: ClassVar[str] = "justify"
+    HORIZONTAL_CENTER_CONTINUOUS: ClassVar[str] = "centerContinuous"
+    HORIZONTAL_DISTRIBUTED: ClassVar[str] = "distributed"
+    VERTICAL_TOP: ClassVar[str] = "top"
+    VERTICAL_CENTER: ClassVar[str] = "center"
+    VERTICAL_BOTTOM: ClassVar[str] = "bottom"
+    VERTICAL_JUSTIFY: ClassVar[str] = "justify"
+    VERTICAL_DISTRIBUTED: ClassVar[str] = "distributed"
 
     horizontal: Optional[str] = None
     vertical: Optional[str] = None
@@ -204,4 +232,4 @@ class Style:
 
 DEFAULT_STYLE = Style()
 
-__all__ = ["Font", "Fill", "Side", "Border", "Alignment", "Style"]
+__all__ = ["Font", "Fill", "BorderSide", "Border", "Alignment", "Style"]

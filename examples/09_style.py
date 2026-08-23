@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from excelkit import Alignment, Border, Fill, Font, Side, Style, Workbook
+from excelkit import Workbook
+from excelkit.style import Alignment, Border, BorderSide, Fill, Font, Style
 
 
 def main() -> None:
@@ -20,8 +21,12 @@ def main() -> None:
     title_style = Style(
         font=Font(name="微软雅黑", size=12, bold=True, color="FFFFFF"),
         fill=Fill("4472C4"),
-        border=Border(bottom=Side("thin", "000000")),
-        alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+        border=Border(bottom=BorderSide(Border.THIN, "000000")),
+        alignment=Alignment(
+            horizontal=Alignment.HORIZONTAL_CENTER,
+            vertical=Alignment.VERTICAL_CENTER,
+            wrap_text=True,
+        ),
     )
     number_style = Style(number_format="0.00")
     for column in range(2):

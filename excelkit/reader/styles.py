@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Set, Tuple
 
 from ..errors import InvalidFileError
-from ..style import Alignment, Border, DEFAULT_STYLE, Fill, Font, Side, Style
+from ..style import Alignment, Border, BorderSide, DEFAULT_STYLE, Fill, Font, Style
 
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _BUILTIN_NUMBER_FORMATS = {
@@ -105,19 +105,19 @@ def _fill(element: ET.Element) -> Fill:
     return Fill(_rgb(pattern.find(_tag("fgColor"))))
 
 
-def _side(element: Optional[ET.Element]) -> Side:
-    """功能：把 XLSX 边框边元素转换为 ExcelKit Side。
+def _side(element: Optional[ET.Element]) -> BorderSide:
+    """功能：把 XLSX 边框边元素转换为 ExcelKit BorderSide。
 
     使用方法：读取 Border 的四条边时内部调用。
     参数：``element`` 为 left、right、top、bottom 元素或 ``None``。
-    返回：受支持线型和颜色组成的 :class:`Side`；不支持线型回退为空边。
+    返回：受支持线型和颜色组成的 :class:`BorderSide`；不支持线型回退为空边。
     """
     if element is None:
-        return Side()
+        return BorderSide()
     try:
-        return Side(element.get("style"), _rgb(element.find(_tag("color"))))
+        return BorderSide(element.get("style"), _rgb(element.find(_tag("color"))))
     except ValueError:
-        return Side()
+        return BorderSide()
 
 
 def _border(element: ET.Element) -> Border:

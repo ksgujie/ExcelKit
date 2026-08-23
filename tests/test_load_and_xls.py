@@ -5,18 +5,10 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 
-from excelkit import (
-    Alignment,
-    Border,
-    Fill,
-    Font,
-    HeaderFooter,
-    PageMargins,
-    Side,
-    Style,
-    Workbook,
-)
+from excelkit import Workbook
 from excelkit.errors import InvalidFileError
+from excelkit.page_setup import HeaderFooter, PageMargins
+from excelkit.style import Alignment, Border, BorderSide, Fill, Font, Style
 
 
 class LoadAndFormatTests(unittest.TestCase):
@@ -52,13 +44,13 @@ class LoadAndFormatTests(unittest.TestCase):
         style = Style(
             font=Font(name="Arial", size=13, bold=True, color="336699"),
             fill=Fill("FFF2CC"),
-            border=Border(bottom=Side("thin", "000000")),
+            border=Border(bottom=BorderSide(Border.THIN, "000000")),
             alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
             number_format="0.00",
         )
         workbook = Workbook()
         sheet = workbook.add_sheet("数据")
-        sheet.label_color = "4472C4"
+        sheet.color = "4472C4"
         sheet["A1"] = "标题"
         sheet["A1"].style = style
         sheet["B2"] = "#2026/8/1 12:33"
@@ -70,7 +62,7 @@ class LoadAndFormatTests(unittest.TestCase):
         self.assertEqual(loaded.active["A1"].style, style)
         self.assertEqual(loaded.active["B2"].value, datetime(2026, 8, 1, 12, 33))
         self.assertEqual(loaded.active["C3"].formula, "=SUM(1,2)")
-        self.assertEqual(loaded.active.label_color, "FF4472C4")
+        self.assertEqual(loaded.active.color, "FF4472C4")
 
     def test_xls_roundtrip_preserves_values_dates_and_basic_style(self):
         """功能：验证 XLS 写出、读取、中文、日期时间和基础样式映射。
@@ -83,7 +75,7 @@ class LoadAndFormatTests(unittest.TestCase):
         style = Style(
             font=Font(bold=True, color="FF0000"),
             fill=Fill("FFFF00"),
-            border=Border(left=Side("thin", "000000")),
+            border=Border(left=BorderSide(Border.THIN, "000000")),
             alignment=Alignment(horizontal="center", wrap_text=True),
             number_format="0.00",
         )
@@ -124,14 +116,14 @@ class LoadAndFormatTests(unittest.TestCase):
         sheet.row(4).hidden = True
         sheet.column(1).width = 20
         sheet.column(3).hidden = True
-        sheet.freeze = "B2"
-        sheet.filter_range = "A2:F100"
+        sheet.freeze_panes = "B2"
+        sheet.auto_filter_range = "A2:F100"
         sheet.show_gridlines = False
         page = sheet.page
         page.orientation = "landscape"
         page.paper_size = "A3"
         page.fit(width=1)
-        page.area = "A1:F100"
+        page.print_area = "A1:F100"
         page.repeat_rows = (0, 1)
         page.repeat_columns = (0, 0)
         page.margins = PageMargins(1.5, 1.6, 2, 2.1, 0.8, 0.9)
@@ -140,7 +132,7 @@ class LoadAndFormatTests(unittest.TestCase):
         page.print_headings = True
         page.black_and_white = True
         page.draft = True
-        page.order = "over_then_down"
+        page.print_order = "over_then_down"
         page.first_page_number = 3
         page.header = HeaderFooter(
             left="研发 && 销售",
@@ -157,13 +149,13 @@ class LoadAndFormatTests(unittest.TestCase):
         self.assertTrue(result.row(4).hidden)
         self.assertEqual(result.column(1).width, 20)
         self.assertTrue(result.column(3).hidden)
-        self.assertEqual(result.freeze, "B2")
-        self.assertEqual(result.filter_range, "A2:F100")
+        self.assertEqual(result.freeze_panes, "B2")
+        self.assertEqual(result.auto_filter_range, "A2:F100")
         self.assertFalse(result.show_gridlines)
         self.assertEqual(result.page.orientation, "landscape")
         self.assertEqual(result.page.paper_size, "A3")
         self.assertEqual((result.page._fit_width, result.page._fit_height), (1, None))
-        self.assertEqual(result.page.area, "A1:F100")
+        self.assertEqual(result.page.print_area, "A1:F100")
         self.assertEqual(result.page.repeat_rows, (0, 1))
         self.assertEqual(result.page.repeat_columns, (0, 0))
         self.assertAlmostEqual(result.page.margins.left, 1.5)
@@ -172,7 +164,7 @@ class LoadAndFormatTests(unittest.TestCase):
         self.assertTrue(result.page.print_headings)
         self.assertTrue(result.page.black_and_white)
         self.assertTrue(result.page.draft)
-        self.assertEqual(result.page.order, "over_then_down")
+        self.assertEqual(result.page.print_order, "over_then_down")
         self.assertEqual(result.page.first_page_number, 3)
         self.assertEqual(result.page.header.left, "研发 && 销售")
         self.assertEqual(result.page.header.center, "&B报表&B")
@@ -195,7 +187,7 @@ class LoadAndFormatTests(unittest.TestCase):
         sheet.row(3).hidden = True
         sheet.column(1).width = 20
         sheet.column(2).hidden = True
-        sheet.freeze = "B2"
+        sheet.freeze_panes = "B2"
         sheet.page.orientation = "landscape"
         sheet.page.fit(width=1)
         sheet.page.header = HeaderFooter(center="报表 &P/&N")
@@ -208,7 +200,7 @@ class LoadAndFormatTests(unittest.TestCase):
         self.assertTrue(result.row(3).hidden)
         self.assertAlmostEqual(result.column(1).width or 0, 20, delta=0.1)
         self.assertTrue(result.column(2).hidden)
-        self.assertEqual(result.freeze, "B2")
+        self.assertEqual(result.freeze_panes, "B2")
 
     def test_csv_and_tsv_loading(self):
         """功能：验证常用分隔文本格式通过 Workbook.load 读取。

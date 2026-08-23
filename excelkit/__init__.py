@@ -3,18 +3,12 @@
 from .core import (
     Cell,
     CellValue,
-    ColumnDimension,
-    HeaderFooter,
-    PageMargins,
-    PageSettings,
     Range,
-    RowDimension,
     Workbook,
     Worksheet,
 )
-from .style import Alignment, Border, Fill, Font, Side, Style
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
@@ -23,15 +17,4 @@ __all__ = [
     "Cell",
     "CellValue",
     "Range",
-    "RowDimension",
-    "ColumnDimension",
-    "PageSettings",
-    "PageMargins",
-    "HeaderFooter",
-    "Style",
-    "Font",
-    "Fill",
-    "Side",
-    "Border",
-    "Alignment",
 ]

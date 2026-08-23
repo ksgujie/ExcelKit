@@ -2,7 +2,8 @@
 
 import unittest
 
-from excelkit import HeaderFooter, PageMargins, Workbook
+from excelkit import Workbook
+from excelkit.page_setup import HeaderFooter, PageMargins
 
 
 class WorkbookSheetManagementTests(unittest.TestCase):
@@ -19,9 +20,9 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         for name in ("甲", "乙", "丙"):
             workbook.add_sheet(name)
         self.assertIs(workbook.move_sheet("丙", 0), workbook)
-        self.assertEqual([sheet.label for sheet in workbook.sheets], ["丙", "甲", "乙"])
+        self.assertEqual([sheet.name for sheet in workbook.sheets], ["丙", "甲", "乙"])
         self.assertIs(workbook.remove_sheet(1), workbook)
-        self.assertEqual([sheet.label for sheet in workbook.sheets], ["丙", "乙"])
+        self.assertEqual([sheet.name for sheet in workbook.sheets], ["丙", "乙"])
         with self.assertRaises(IndexError):
             workbook.move_sheet("乙", 2)
         with self.assertRaises(TypeError):
@@ -40,8 +41,8 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         source.range("A1:C1").merge()
         source.row(0).height = 28
         source.column(1).width = 20
-        source.freeze = "B2"
-        source.filter_range = "A1:C3"
+        source.freeze_panes = "B2"
+        source.auto_filter_range = "A1:C3"
         source.show_gridlines = False
         source.page.orientation = "landscape"
         source.page.fit(width=1)
@@ -52,8 +53,8 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         self.assertEqual([area.address for area in copied.merged_ranges], ["A1:C1"])
         self.assertEqual(copied.row(0).height, 28)
         self.assertEqual(copied.column(1).width, 20)
-        self.assertEqual(copied.freeze, "B2")
-        self.assertEqual(copied.filter_range, "A1:C3")
+        self.assertEqual(copied.freeze_panes, "B2")
+        self.assertEqual(copied.auto_filter_range, "A1:C3")
         self.assertFalse(copied.show_gridlines)
         self.assertEqual(copied.page.orientation, "landscape")
         self.assertEqual(copied.page.header.center, "报表")
@@ -133,16 +134,16 @@ class WorksheetLayoutTests(unittest.TestCase):
         self.assertIs(self.worksheet.row(0), row)
         self.assertIs(self.worksheet.column(1), column)
 
-        self.worksheet.freeze = "b2"
-        self.worksheet.filter_range = "a1:c20"
+        self.worksheet.freeze_panes = "b2"
+        self.worksheet.auto_filter_range = "a1:c20"
         self.worksheet.show_gridlines = False
-        self.assertEqual(self.worksheet.freeze, "B2")
-        self.assertEqual(self.worksheet.filter_range, "A1:C20")
+        self.assertEqual(self.worksheet.freeze_panes, "B2")
+        self.assertEqual(self.worksheet.auto_filter_range, "A1:C20")
         self.assertFalse(self.worksheet.show_gridlines)
-        self.worksheet.freeze = "A1"
-        self.worksheet.filter_range = None
-        self.assertIsNone(self.worksheet.freeze)
-        self.assertIsNone(self.worksheet.filter_range)
+        self.worksheet.freeze_panes = "A1"
+        self.worksheet.auto_filter_range = None
+        self.assertIsNone(self.worksheet.freeze_panes)
+        self.assertIsNone(self.worksheet.auto_filter_range)
 
 
 class PageSettingsTests(unittest.TestCase):
@@ -181,7 +182,7 @@ class PageSettingsTests(unittest.TestCase):
         返回：无；断言页面打印属性均保存规范值。
         """
         page = Workbook().active.page
-        page.area = "a1:f100"
+        page.print_area = "a1:f100"
         page.repeat_rows = (0, 1)
         page.repeat_columns = (0, 0)
         page.margins = PageMargins(1.5, 1.5, 2, 2, 0.8, 0.8)
@@ -191,7 +192,7 @@ class PageSettingsTests(unittest.TestCase):
         page.print_gridlines = True
         page.print_headings = True
         page.first_page_number = 3
-        self.assertEqual(page.area, "A1:F100")
+        self.assertEqual(page.print_area, "A1:F100")
         self.assertEqual(page.repeat_rows, (0, 1))
         self.assertEqual(page.repeat_columns, (0, 0))
         self.assertEqual(page.margins.left, 1.5)

@@ -187,7 +187,7 @@ class XlsWriter:
         for worksheet in self.workbook.sheets:
             if worksheet.max_row >= 65536 or worksheet.max_column >= 256:
                 raise ValueError("XLS 仅支持 65536 行和 256 列，当前数据已超过格式上限")
-            target_sheet = output.add_sheet(worksheet.label)
+            target_sheet = output.add_sheet(worksheet.name)
             target_sheet.set_show_grid(worksheet.show_gridlines)
             for row_index, dimension in worksheet._rows.items():
                 if dimension._is_default():
@@ -204,10 +204,10 @@ class XlsWriter:
                 if dimension.width is not None:
                     target_column.width = int(round(dimension.width * 256))
                 target_column.hidden = int(dimension.hidden)
-            if worksheet.freeze is not None:
+            if worksheet.freeze_panes is not None:
                 from ..address import cell_index
 
-                freeze_row, freeze_column = cell_index(worksheet.freeze)
+                freeze_row, freeze_column = cell_index(worksheet.freeze_panes)
                 target_sheet.set_panes_frozen(True)
                 target_sheet.set_horz_split_pos(freeze_row)
                 target_sheet.set_vert_split_pos(freeze_column)
@@ -217,7 +217,7 @@ class XlsWriter:
             page = worksheet.page
             target_sheet.set_portrait(page.orientation == "portrait")
             target_sheet.set_paper_size_code(_PAPER_SIZE_CODES[page.paper_size])
-            target_sheet.set_print_in_rows(page.order == "over_then_down")
+            target_sheet.set_print_in_rows(page.print_order == "over_then_down")
             target_sheet.set_print_colour(not page.black_and_white)
             target_sheet.set_print_draft(page.draft)
             target_sheet.set_print_centered_horz(page.center_horizontal)

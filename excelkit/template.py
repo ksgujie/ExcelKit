@@ -579,7 +579,7 @@ def render_workbook(
     workbook: "Workbook",
     context: Optional[Mapping[str, Any]] = None,
     *,
-    by_sheet: Optional[
+    sheet_data: Optional[
         Mapping[Union[str, int], Mapping[str, Any]]
     ] = None,
     strict: bool = False,
@@ -588,7 +588,7 @@ def render_workbook(
 
     使用方法：由 ``workbook.render(data)`` 唯一公开入口调用。
     参数：``workbook`` 为待渲染工作簿；``context`` 为共享根映射或 ``None``；
-    ``by_sheet`` 以工作表名称或0-based索引映射到独立根数据；``strict`` 为
+    ``sheet_data`` 以工作表名称或0-based索引映射到独立根数据；``strict`` 为
     ``True`` 时缺失数据立即报错，为 ``False`` 时标签按空值处理。
     返回：传入的同一个 Workbook，支持继续 ``save()`` 链式调用。
     异常：参数、工作表标识、数据或模板无效时抛出相应异常；失败时所有目标
@@ -601,18 +601,18 @@ def render_workbook(
     if not isinstance(strict, bool):
         raise TypeError("strict 必须是布尔值")
     targets: List[Tuple["Worksheet", Mapping[str, Any]]] = []
-    if by_sheet is None:
+    if sheet_data is None:
         targets = [(sheet, context) for sheet in workbook.sheets]
     else:
-        if not isinstance(by_sheet, Mapping):
-            raise TypeError("by_sheet 必须是工作表标识到独立数据的映射")
+        if not isinstance(sheet_data, Mapping):
+            raise TypeError("sheet_data 必须是工作表标识到独立数据的映射")
         seen = set()
-        for identifier, local_context in by_sheet.items():
+        for identifier, local_context in sheet_data.items():
             worksheet = workbook.sheet(identifier)
             if worksheet in seen:
-                raise ValueError("by_sheet 不能用不同标识重复指定同一张工作表")
+                raise ValueError("sheet_data 不能用不同标识重复指定同一张工作表")
             if not isinstance(local_context, Mapping):
-                raise TypeError("by_sheet 中每张工作表的数据都必须是映射对象")
+                raise TypeError("sheet_data 中每张工作表的数据都必须是映射对象")
             merged_context = dict(context)
             merged_context.update(local_context)
             targets.append((worksheet, merged_context))

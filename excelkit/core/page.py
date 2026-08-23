@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional, Tuple, cast
+from typing import ClassVar, Optional, Tuple, cast
 
-from ..address import parse_range, validate_column_index, validate_row_index
+from ..address import range_index, validate_column_index, validate_row_index
 
 _PAPER_SIZES = {
     "a3": "A3",
@@ -130,10 +130,20 @@ def _index_pair(
 class PageSettings:
     """集中保存工作表页面、缩放、打印区域及页眉页脚设置。"""
 
+    PORTRAIT: ClassVar[str] = "portrait"
+    LANDSCAPE: ClassVar[str] = "landscape"
+    A3: ClassVar[str] = "A3"
+    A4: ClassVar[str] = "A4"
+    A5: ClassVar[str] = "A5"
+    LETTER: ClassVar[str] = "Letter"
+    LEGAL: ClassVar[str] = "Legal"
+    DOWN_THEN_OVER: ClassVar[str] = "down_then_over"
+    OVER_THEN_DOWN: ClassVar[str] = "over_then_down"
+
     __slots__ = (
         "orientation", "paper_size", "scale", "_fit_width", "_fit_height",
-        "first_page_number", "black_and_white", "draft", "order", "margins",
-        "area", "repeat_rows", "repeat_columns", "center_horizontal",
+        "first_page_number", "black_and_white", "draft", "print_order", "margins",
+        "print_area", "repeat_rows", "repeat_columns", "center_horizontal",
         "center_vertical", "print_gridlines", "print_headings", "header", "footer",
     )
 
@@ -152,9 +162,9 @@ class PageSettings:
         object.__setattr__(self, "first_page_number", None)
         object.__setattr__(self, "black_and_white", False)
         object.__setattr__(self, "draft", False)
-        object.__setattr__(self, "order", "down_then_over")
+        object.__setattr__(self, "print_order", self.DOWN_THEN_OVER)
         object.__setattr__(self, "margins", PageMargins())
-        object.__setattr__(self, "area", None)
+        object.__setattr__(self, "print_area", None)
         object.__setattr__(self, "repeat_rows", None)
         object.__setattr__(self, "repeat_columns", None)
         object.__setattr__(self, "center_horizontal", False)
@@ -201,10 +211,10 @@ class PageSettings:
         }:
             if not isinstance(value, bool):
                 raise TypeError(f"{name} 必须是布尔值")
-        elif name == "order":
+        elif name == "print_order":
             if value not in _ORDERS:
                 raise ValueError(
-                    "order 必须是 'down_then_over' 或 'over_then_down'"
+                    "print_order 必须是 'down_then_over' 或 'over_then_down'"
                 )
         elif name == "margins":
             if not isinstance(value, PageMargins):
@@ -212,11 +222,11 @@ class PageSettings:
         elif name in {"header", "footer"}:
             if not isinstance(value, HeaderFooter):
                 raise TypeError(f"{name} 必须是 HeaderFooter")
-        elif name == "area":
+        elif name == "print_area":
             if value is not None:
                 if not isinstance(value, str):
-                    raise TypeError("area 必须是A1区域字符串或 None")
-                parse_range(value)
+                    raise TypeError("print_area 必须是A1区域字符串或 None")
+                range_index(value)
                 value = value.upper()
         elif name == "repeat_rows":
             value = _index_pair(

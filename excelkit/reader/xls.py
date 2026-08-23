@@ -11,7 +11,7 @@ import xlrd
 
 from ..address import cell_address
 from ..errors import InvalidFileError
-from ..style import Alignment, Border, DEFAULT_STYLE, Fill, Font, Side, Style
+from ..style import Alignment, Border, BorderSide, DEFAULT_STYLE, Fill, Font, Style
 
 if TYPE_CHECKING:
     from ..core.workbook import Workbook
@@ -45,16 +45,16 @@ def _color(book: xlrd.book.Book, index: int) -> Optional[str]:
     return "FF{:02X}{:02X}{:02X}".format(*rgb)
 
 
-def _side(book: xlrd.book.Book, line_style: int, color_index: int) -> Side:
-    """功能：把 XLS 边框线记录转换为 ExcelKit Side。
+def _side(book: xlrd.book.Book, line_style: int, color_index: int) -> BorderSide:
+    """功能：把 XLS 边框线记录转换为 ExcelKit BorderSide。
 
     使用方法：构造四边 Border 时内部调用。
     参数：``book`` 为 xlrd 工作簿；``line_style`` 为线型编号；
     ``color_index`` 为调色板索引。
-    返回：对应的 :class:`Side`；未知线型按无边框处理。
+    返回：对应的 :class:`BorderSide`；未知线型按无边框处理。
     """
     style = _BORDER_STYLES.get(line_style)
-    return Side(style=style, color=_color(book, color_index) if style else None)
+    return BorderSide(style=style, color=_color(book, color_index) if style else None)
 
 
 def _style(book: xlrd.book.Book, xf_index: int) -> Style:
@@ -182,7 +182,7 @@ def _load_xls(
             row = int(source_sheet.horz_split_pos or 0)
             column = int(source_sheet.vert_split_pos or 0)
             if row or column:
-                worksheet.freeze = cell_address(row, column)
+                worksheet.freeze_panes = cell_address(row, column)
     return workbook
 
 

@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Set, Type, TypeVar
 
-from ..address import cell_address, cell_index, column_to_index, parse_range
+from ..address import cell_address, cell_index, column_to_index, range_index
 from ..core.page import HeaderFooter, PageMargins
 from ..errors import InvalidFileError
 from ..style import DEFAULT_STYLE, Style
@@ -260,11 +260,11 @@ def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
             if pane is not None and pane.get("state") in {"frozen", "frozenSplit"}:
                 top_left = pane.get("topLeftCell")
                 if top_left:
-                    worksheet.freeze = top_left
+                    worksheet.freeze_panes = top_left
                 else:
                     row = int(float(pane.get("ySplit", "0")))
                     column = int(float(pane.get("xSplit", "0")))
-                    worksheet.freeze = cell_address(row, column)
+                    worksheet.freeze_panes = cell_address(row, column)
 
         columns = root.find(_tag(_MAIN_NS, "cols"))
         if columns is not None:
@@ -303,12 +303,12 @@ def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
                 reference = source.get("ref")
                 if not reference:
                     raise ValueError("合并区域缺少地址")
-                worksheet._merge_range(*parse_range(reference))
+                worksheet._merge_range(*range_index(reference))
 
         auto_filter = root.find(_tag(_MAIN_NS, "autoFilter"))
         if auto_filter is not None and auto_filter.get("ref"):
             reference = auto_filter.get("ref") or ""
-            worksheet.filter_range = (
+            worksheet.auto_filter_range = (
                 reference if ":" in reference else f"{reference}:{reference}"
             )
 
@@ -343,7 +343,7 @@ def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
                 if paper_code in _PAPER_SIZE_NAMES:
                     worksheet.page.paper_size = _PAPER_SIZE_NAMES[paper_code]
             if setup.get("pageOrder") in {"downThenOver", "overThenDown"}:
-                worksheet.page.order = (
+                worksheet.page.print_order = (
                     "down_then_over"
                     if setup.get("pageOrder") == "downThenOver"
                     else "over_then_down"
@@ -401,7 +401,7 @@ def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
             if item.get("name") == "_xlnm.Print_Area":
                 match = _ABSOLUTE_AREA_PATTERN.search(item.text)
                 if match:
-                    page.area = (
+                    page.print_area = (
                         f"{match.group(1)}{match.group(2)}:"
                         f"{match.group(3)}{match.group(4)}"
                     )
@@ -448,7 +448,7 @@ def _load_sheet(
     )
     if tab_color is not None and tab_color.get("rgb"):
         try:
-            worksheet.label_color = tab_color.get("rgb")
+            worksheet.color = tab_color.get("rgb")
         except ValueError as error:
             raise InvalidFileError("工作表标签颜色不是有效的 RGB 或 ARGB 值") from error
     for cell in root.findall(f".//{_tag(_MAIN_NS, 'sheetData')}//{_tag(_MAIN_NS, 'c')}"):

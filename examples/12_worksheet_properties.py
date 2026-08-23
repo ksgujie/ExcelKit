@@ -14,8 +14,8 @@ def main() -> None:
     """
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.label = "销售明细"
-    worksheet.label_color = "4472C4"
+    worksheet.name = "销售明细"
+    worksheet.color = "4472C4"
     worksheet.append_rows([
         ["产品", "数量"],
         ["产品 A", 2],
@@ -23,7 +23,7 @@ def main() -> None:
     ])
 
     assert workbook.sheet("销售明细") is worksheet
-    assert worksheet.label_color == "FF4472C4"
+    assert worksheet.color == "FF4472C4"
     output = Path("12_worksheet_properties.xlsx")
     workbook.save(output)
     print(f"已生成：{output.resolve()}")

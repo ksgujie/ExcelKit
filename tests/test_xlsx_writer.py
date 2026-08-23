@@ -55,7 +55,7 @@ class XlsxWriterTests(unittest.TestCase):
             filename = Path(directory) / "types.xlsx"
             workbook = Workbook()
             sheet = workbook.add_sheet("数据 & 公式")
-            sheet.label_color = "4472C4"
+            sheet.color = "4472C4"
             sheet.append([" text ", True, 42, 3.5, date(2026, 8, 22)])
             sheet.append([datetime(2026, 8, 22, 12, 30), object()])
             sheet["F1"].formula = "=SUM(C1:D1)"

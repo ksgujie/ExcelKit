@@ -111,10 +111,10 @@ def cell_index(address: str) -> Tuple[int, int]:
     return row, column
 
 
-def parse_range(address: str) -> Tuple[int, int, int, int]:
+def range_index(address: str) -> Tuple[int, int, int, int]:
     """功能：把 A1 矩形区域解析为 0-based 边界索引。
 
-    使用方法：``parse_range("B3:D8")`` 返回 ``(2, 1, 7, 3)``。
+    使用方法：``range_index("B3:D8")`` 返回 ``(2, 1, 7, 3)``。
     参数：``address`` 必须是 ``起始单元格:结束单元格`` 字符串，起点不能位于
     终点的下方或右侧。
     返回：``(最小行, 最小列, 最大行, 最大列)`` 元组，顺序始终先行后列。
@@ -147,12 +147,35 @@ def cell_address(row: int, column: int) -> str:
     return f"{index_to_column(column)}{row + 1}"
 
 
+def range_address(
+    min_row: int, min_column: int, max_row: int, max_column: int
+) -> str:
+    """功能：把 0-based 区域边界转换为规范化 A1 区域地址。
+
+    使用方法：``range_address(2, 1, 7, 3)`` 返回 ``"B3:D8"``。
+    参数：``min_row``、``min_column``、``max_row``、``max_column`` 均为 0-based
+    整数索引，顺序固定为最小行、最小列、最大行、最大列。
+    返回：规范化的大写 A1 区域地址字符串。
+    异常：索引类型、范围或矩形方向无效时抛出 ``InvalidAddressError``。
+    """
+    validate_row_index(min_row)
+    validate_column_index(min_column)
+    validate_row_index(max_row)
+    validate_column_index(max_column)
+    if min_row > max_row or min_column > max_column:
+        raise InvalidAddressError("区域起点必须位于终点的左上方")
+    start = cell_address(min_row, min_column)
+    end = cell_address(max_row, max_column)
+    return start if start == end else f"{start}:{end}"
+
+
 __all__ = [
     "MAX_ROW",
     "MAX_COLUMN",
     "column_to_index",
     "index_to_column",
     "cell_index",
-    "parse_range",
+    "range_index",
     "cell_address",
+    "range_address",
 ]

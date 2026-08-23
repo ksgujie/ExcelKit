@@ -1,5 +1,20 @@
 # 更新日志
 
+## 0.3.0 - 2026-08-23
+
+- 收敛顶层导出：`excelkit` 仅保留 `Workbook`、`Worksheet`、`Cell`、`CellValue`、
+  `Range` 和版本号；样式、页面、地址、异常分别从 `excelkit.style`、
+  `excelkit.page_setup`、`excelkit.address`、`excelkit.errors` 导入。
+- 统一公开命名：工作表使用 `name`、`color`，冻结和筛选使用
+  `freeze_panes`、`auto_filter_range`，页面使用 `print_order`、`print_area`，
+  模板分表数据参数使用 `sheet_data`。
+- 删除 0.3.0 中的旧公开别名，避免同一功能多处实现；`Side` 改为
+  `BorderSide`，`parse_range` 改为 `range_index`。
+- 为 `Border`、`Alignment`、`PageSettings` 增加可由 IDE 自动补全的常量，减少
+  手写枚举字符串错误。
+- 新增 `range_address()`，与 `range_index()` 成对提供区域地址解析和生成。
+- 同步更新中文 API 手册、README、示例、迁移说明和回归测试。
+
 ## 0.2.3 - 2026-08-23
 
 - 工作表标签查询改为大小写不敏感，并让所有公开工作表整数索引统一拒绝负数。

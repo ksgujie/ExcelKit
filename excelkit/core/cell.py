@@ -337,6 +337,6 @@ class Cell:
         返回：包含工作表名、A1 地址、普通值和公式的字符串。
         """
         return (
-            f"<Cell {self._worksheet.label}!{self.address} "
+            f"<Cell {self._worksheet.name}!{self.address} "
             f"value={self.value!r} formula={self.formula!r}>"
         )

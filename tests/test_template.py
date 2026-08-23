@@ -5,8 +5,9 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from excelkit import Fill, Font, Style, Workbook
+from excelkit import Workbook
 from excelkit.errors import TemplateError
+from excelkit.style import Fill, Font, Style
 
 
 class TemplateTests(unittest.TestCase):
@@ -265,7 +266,7 @@ class TemplateTests(unittest.TestCase):
         relaxed_workbook.render({"price": 8})
         self.assertIsNone(relaxed_workbook.active["A1"].value)
 
-    def test_by_sheet_combines_shared_and_independent_data(self):
+    def test_sheet_data_combines_shared_and_independent_data(self):
         """功能：验证一次调用可按名称或0-based索引为多张表提供独立根数据。
 
         使用方法：由 unittest 自动发现执行。
@@ -287,7 +288,7 @@ class TemplateTests(unittest.TestCase):
 
         result = workbook.render(
             {"company": "示例公司", "title": "公共标题"},
-            by_sheet={
+            sheet_data={
                 "封面": {"title": "封面标题"},
                 1: {"title": "明细标题", "items": [{"name": "产品A"}]},
             },
@@ -298,7 +299,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(detail.values, [["示例公司", "明细标题"], ["产品A", None]])
         self.assertEqual(untouched["A1"].value, "{remain}")
 
-    def test_by_sheet_validation_and_rendering_are_atomic(self):
+    def test_sheet_data_validation_and_rendering_are_atomic(self):
         """功能：验证分工作表标识、独立数据及严格渲染失败均不会部分提交。
 
         使用方法：由 unittest 自动发现执行。
@@ -313,17 +314,17 @@ class TemplateTests(unittest.TestCase):
         original = [sheet.values for sheet in workbook.sheets]
 
         with self.assertRaises(ValueError):
-            workbook.render(by_sheet={"一": {"value": 1}, 0: {"value": 2}})
+            workbook.render(sheet_data={"一": {"value": 1}, 0: {"value": 2}})
         self.assertEqual([sheet.values for sheet in workbook.sheets], original)
 
         with self.assertRaises(TemplateError):
             workbook.render(
-                by_sheet={"一": {"value": 1}, "二": {}}, strict=True
+                sheet_data={"一": {"value": 1}, "二": {}}, strict=True
             )
         self.assertEqual([sheet.values for sheet in workbook.sheets], original)
 
         with self.assertRaises(TypeError):
-            workbook.render(by_sheet={"一": [1, 2]})
+            workbook.render(sheet_data={"一": [1, 2]})
 
 
 if __name__ == "__main__":

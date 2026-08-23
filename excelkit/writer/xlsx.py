@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence, Union
 
-from ..address import cell_address, index_to_column, parse_range
+from ..address import cell_address, index_to_column, range_index
 from ..core.page import header_footer_text
 from ..style import DEFAULT_STYLE
 from .styles import StyleRegistry
@@ -166,18 +166,18 @@ def workbook_xml(sheets: Sequence["Worksheet"]) -> bytes:
             sheet_elements,
             _qname(_MAIN_NS, "sheet"),
             {
-                "name": worksheet.label,
+                "name": worksheet.name,
                 "sheetId": str(sheet_index + 1),
                 _qname(_REL_NS, "id"): f"rId{sheet_index + 1}",
             },
         )
     defined_names = []
     for sheet_index, worksheet in enumerate(sheets):
-        sheet_name = worksheet.label.replace("'", "''")
+        sheet_name = worksheet.name.replace("'", "''")
         prefix = f"'{sheet_name}'!"
-        if worksheet.page.area is not None:
-            min_row, min_column, max_row, max_column = parse_range(
-                worksheet.page.area
+        if worksheet.page.print_area is not None:
+            min_row, min_column, max_row, max_column = range_index(
+                worksheet.page.print_area
             )
             area = (
                 f"${index_to_column(min_column)}${min_row + 1}:"
@@ -318,13 +318,13 @@ def sheet_xml(
     fit_mode = page.scale is None and (
         page._fit_width is not None or page._fit_height is not None
     )
-    if sheet.label_color is not None or fit_mode:
+    if sheet.color is not None or fit_mode:
         properties = ET.SubElement(root, _qname(_MAIN_NS, "sheetPr"))
-        if sheet.label_color is not None:
+        if sheet.color is not None:
             ET.SubElement(
                 properties,
                 _qname(_MAIN_NS, "tabColor"),
-                {"rgb": sheet.label_color},
+                {"rgb": sheet.color},
             )
         if fit_mode:
             ET.SubElement(
@@ -351,11 +351,11 @@ def sheet_xml(
     sheet_view = ET.SubElement(
         sheet_views, _qname(_MAIN_NS, "sheetView"), view_attributes
     )
-    if sheet.freeze is not None:
-        freeze_row, freeze_column = parse_range(
-            f"{sheet.freeze}:{sheet.freeze}"
+    if sheet.freeze_panes is not None:
+        freeze_row, freeze_column = range_index(
+            f"{sheet.freeze_panes}:{sheet.freeze_panes}"
         )[:2]
-        pane_attributes = {"state": "frozen", "topLeftCell": sheet.freeze}
+        pane_attributes = {"state": "frozen", "topLeftCell": sheet.freeze_panes}
         if freeze_column:
             pane_attributes["xSplit"] = str(freeze_column)
         if freeze_row:
@@ -369,7 +369,7 @@ def sheet_xml(
         ET.SubElement(
             sheet_view,
             _qname(_MAIN_NS, "selection"),
-            {"pane": pane, "activeCell": sheet.freeze, "sqref": sheet.freeze},
+            {"pane": pane, "activeCell": sheet.freeze_panes, "sqref": sheet.freeze_panes},
         )
 
     custom_columns = [
@@ -426,9 +426,9 @@ def sheet_xml(
                 if style_id:
                     element.set("s", str(style_id))
                 row_element.append(element)
-    if sheet.filter_range is not None:
+    if sheet.auto_filter_range is not None:
         ET.SubElement(
-            root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.filter_range}
+            root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.auto_filter_range}
         )
     if sheet._merged_ranges:
         merge_cells = ET.SubElement(
@@ -468,7 +468,7 @@ def sheet_xml(
         "orientation": page.orientation,
         "paperSize": str(_PAPER_SIZE_CODES[page.paper_size]),
         "pageOrder": (
-            "downThenOver" if page.order == "down_then_over" else "overThenDown"
+            "downThenOver" if page.print_order == "down_then_over" else "overThenDown"
         ),
         "blackAndWhite": "1" if page.black_and_white else "0",
         "draft": "1" if page.draft else "0",

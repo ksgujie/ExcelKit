@@ -3,9 +3,11 @@
 import unittest
 from datetime import date, datetime
 
-from excelkit import Alignment, Fill, Font, Style, Workbook
+from excelkit import Workbook
 from excelkit.errors import InvalidWorksheetNameError
+from excelkit.page_setup import PageSettings
 from excelkit.storage import ValueStore
+from excelkit.style import Alignment, Border, BorderSide, Fill, Font, Style
 
 
 class WorkbookTests(unittest.TestCase):
@@ -21,8 +23,24 @@ class WorkbookTests(unittest.TestCase):
         workbook = Workbook()
         self.assertEqual(workbook.sheets, ())
         active = workbook.active
-        self.assertEqual(active.label, "Sheet1")
+        self.assertEqual(active.name, "Sheet1")
         self.assertIs(workbook.active, active)
+
+    def test_public_modules_are_categorized_and_constants_are_available(self):
+        """功能：验证顶层只暴露核心对象，分类模块暴露样式和页面类型。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言顶层边界、样式线型常量和页面常量。
+        """
+        import excelkit
+
+        self.assertFalse(hasattr(excelkit, "Border"))
+        self.assertFalse(hasattr(excelkit, "PageSettings"))
+        self.assertFalse(hasattr(excelkit, "HeaderFooter"))
+        self.assertEqual(BorderSide(Border.DASH_DOT).style, "dashDot")
+        self.assertEqual(Alignment.HORIZONTAL_CENTER, "center")
+        self.assertEqual(PageSettings.A4, "A4")
 
     def test_sheet_supports_name_and_zero_based_index(self):
         """功能：验证 sheet 的标签查询和非负 0-based 索引查询。
@@ -64,7 +82,7 @@ class WorkbookTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(InvalidWorksheetNameError):
                 workbook.add_sheet(name)
 
-    def test_worksheet_label_setter_updates_workbook_index_atomically(self):
+    def test_worksheet_name_setter_updates_workbook_index_atomically(self):
         """功能：验证工作表重命名同步名称索引并在失败时保持原名称。
 
         使用方法：由 unittest 自动发现执行。
@@ -74,24 +92,25 @@ class WorkbookTests(unittest.TestCase):
         workbook = Workbook()
         first = workbook.add_sheet("原名称")
         second = workbook.add_sheet("其他")
-        first.label = "新名称"
-        self.assertEqual(first.label, "新名称")
+        first.name = "新名称"
+        self.assertEqual(first.name, "新名称")
         self.assertIs(workbook.sheet("新名称"), first)
         self.assertEqual(workbook.sheets, (first, second))
         with self.assertRaises(KeyError):
             workbook.sheet("原名称")
         with self.assertRaises(ValueError):
-            first.label = "其他"
-        self.assertEqual(first.label, "新名称")
+            first.name = "其他"
+        self.assertEqual(first.name, "新名称")
         with self.assertRaises(InvalidWorksheetNameError):
-            first.label = ""
-        self.assertEqual(first.label, "新名称")
-        first.label = "NewName"
+            first.name = ""
+        self.assertEqual(first.name, "新名称")
+        first.name = "NewName"
         self.assertIs(workbook.sheet("newname"), first)
-        first.label = "newname"
-        self.assertEqual(first.label, "newname")
+        first.name = "newname"
+        self.assertEqual(first.name, "newname")
         self.assertIs(workbook.sheet("newname"), first)
-        self.assertFalse(hasattr(first, "name"))
+        self.assertTrue(hasattr(first, "name"))
+        self.assertFalse(hasattr(first, "label"))
         self.assertFalse(hasattr(first, "tab_name"))
 
 
@@ -379,23 +398,23 @@ class WorksheetTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.worksheet["A1"].style = {"bold": True}
 
-    def test_worksheet_label_color_normalizes_and_clears(self):
+    def test_worksheet_color_normalizes_and_clears(self):
         """功能：验证工作表标签颜色使用统一 RGB/ARGB 规则并支持清除。
 
         使用方法：由 unittest 自动发现执行。
         参数：无。
         返回：无；断言失败时由测试框架报告。
         """
-        self.assertIsNone(self.worksheet.label_color)
-        self.worksheet.label_color = "4472c4"
-        self.assertEqual(self.worksheet.label_color, "FF4472C4")
-        self.worksheet.label_color = "804472C4"
-        self.assertEqual(self.worksheet.label_color, "804472C4")
+        self.assertIsNone(self.worksheet.color)
+        self.worksheet.color = "4472c4"
+        self.assertEqual(self.worksheet.color, "FF4472C4")
+        self.worksheet.color = "804472C4"
+        self.assertEqual(self.worksheet.color, "804472C4")
         with self.assertRaises(ValueError):
-            self.worksheet.label_color = "blue"
-        self.assertEqual(self.worksheet.label_color, "804472C4")
-        self.worksheet.label_color = None
-        self.assertIsNone(self.worksheet.label_color)
+            self.worksheet.color = "blue"
+        self.assertEqual(self.worksheet.color, "804472C4")
+        self.worksheet.color = None
+        self.assertIsNone(self.worksheet.color)
         self.assertFalse(hasattr(self.worksheet, "tab_color"))
 
 

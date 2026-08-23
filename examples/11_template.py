@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from excelkit import Alignment, Fill, Font, Style, Workbook
+from excelkit import Workbook
+from excelkit.style import Alignment, Fill, Font, Style
 
 
 def create_template(filename: Path) -> None:
@@ -14,7 +15,7 @@ def create_template(filename: Path) -> None:
     """
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.label = "销售明细"
+    worksheet.name = "销售明细"
     worksheet["A1"] = "{title}"
     worksheet["A2"] = "客户：{customer.name}"
     worksheet.append(["序号", "产品", "数量", "单价", "金额", "显示金额"])
@@ -78,7 +79,7 @@ def main() -> None:
         "汇总": {"total": 183},
     }
     Workbook.load(template_file).render(
-        shared_data, by_sheet=sheet_data
+        shared_data, sheet_data=sheet_data
     ).save(output_file)
     print(f"模板：{template_file.resolve()}")
     print(f"结果：{output_file.resolve()}")

@@ -1,6 +1,6 @@
-# ExcelKit 0.2.3 完整中文使用与 API 手册
+# ExcelKit 0.3.0 完整中文使用与 API 手册
 
-版本：0.2.3
+版本：0.3.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,24 +8,23 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.2.3-py3-none-any.whl
+pip install excelkit-0.3.0-py3-none-any.whl
 ```
 
-稳定核心对象从顶层导入：
+核心对象从顶层导入：
 
 ```python
 from excelkit import (
     Workbook, Worksheet, Cell, CellValue, Range,
-    RowDimension, ColumnDimension,
-    PageSettings, PageMargins, HeaderFooter,
-    Style, Font, Fill, Side, Border, Alignment,
     __version__,
 )
 ```
 
-地址和异常分别从唯一模块导入：
+样式、页面、地址和异常分别从分类模块导入：
 
 ```python
+from excelkit.style import Style, Border, BorderSide, Alignment
+from excelkit.page_setup import PageSettings, PageMargins, HeaderFooter
 from excelkit.address import cell_index, cell_address
 from excelkit.errors import InvalidAddressError
 ```
@@ -66,7 +65,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.2.3"
+assert excelkit.__version__ == "0.3.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -179,7 +178,7 @@ workbook.add_sheet("一")
 workbook.add_sheet("二")
 workbook.add_sheet("三")
 workbook.move_sheet("三", 0)
-assert tuple(sheet.label for sheet in workbook.sheets) == ("三", "一", "二")
+assert tuple(sheet.name for sheet in workbook.sheets) == ("三", "一", "二")
 ```
 
 ### `Workbook.copy_sheet(name_or_index, new_name)`
@@ -201,7 +200,7 @@ assert tuple(sheet.label for sheet in workbook.sheets) == ("三", "一", "二")
 
 ```python
 source = workbook.sheet("月报")
-copy = workbook.copy_sheet(source.label, "月报副本")
+copy = workbook.copy_sheet(source.name, "月报副本")
 copy["A1"] = "仅修改副本"
 assert source["A1"].value != copy["A1"].value
 ```
@@ -218,7 +217,7 @@ assert source["A1"].value != copy["A1"].value
 
 ```python
 for index, worksheet in enumerate(workbook.sheets):
-    print(index, worksheet.label)
+    print(index, worksheet.name)
 ```
 
 ### `Workbook.active`
@@ -234,7 +233,7 @@ for index, worksheet in enumerate(workbook.sheets):
 ```python
 empty_workbook = Workbook()
 worksheet = empty_workbook.active
-assert worksheet.label == "Sheet1"
+assert worksheet.name == "Sheet1"
 assert empty_workbook.active is worksheet
 ```
 
@@ -270,9 +269,9 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.2.3 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.3.0 也不提供宏对象模型。
 
-### `Workbook.render(data=None, *, by_sheet=None, strict=False)`
+### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
 功能：把当前工作簿作为 Excel 模板，使用一份公共数据渲染全部工作表，或者给多张
 指定工作表分别提供独立根数据。渲染直接作用于当前工作簿，成功后可以链式保存；
@@ -283,22 +282,22 @@ XLSM 中的宏不会执行；0.2.3 也不提供宏对象模型。
 - `data: Mapping[str, Any] | None = None`：所有目标工作表共享的根数据；通常是
   字典，支持点分路径读取嵌套映射、列表的 0-based 数字下标及对象公开属性。
   `None` 等价于空字典。
-- `by_sheet: Mapping[str | int, Mapping[str, Any]] | None = None`：可选的分工作表
+- `sheet_data: Mapping[str | int, Mapping[str, Any]] | None = None`：可选的分工作表
   数据。键为工作表名称或当前顺序的 0-based 索引，值为该表自己的根字典。同名
   字段以工作表数据为准。指定该参数时只渲染列出的工作表，其他工作表完全不变。
 - `strict: bool = False`：默认非严格模式把缺失标签当成空值；设为 `True` 后，
   任意缺失普通字段或循环集合都会抛出 `TemplateError`。
 
-签名中的 `*` 不是参数，它表示 `by_sheet` 和 `strict` 必须按参数名称传递：
+签名中的 `*` 不是参数，它表示 `sheet_data` 和 `strict` 必须按参数名称传递：
 
 ```python
-workbook.render(data, by_sheet=sheet_data, strict=True)  # 正确
+workbook.render(data, sheet_data=sheet_data, strict=True)  # 正确
 # workbook.render(data, sheet_data, True)                # TypeError
 ```
 
 返回：当前 `Workbook`，支持 `load().render().save()` 链式调用。
 
-异常：`data`、`by_sheet`、独立根数据或 `strict` 类型错误时抛出 `TypeError`；
+异常：`data`、`sheet_data`、独立根数据或 `strict` 类型错误时抛出 `TypeError`；
 工作表名称不存在抛出 `KeyError`，索引越界抛出 `IndexError`，同一张表同时被名称
 和索引重复指定时抛出 `ValueError`；严格模式字段缺失、循环结构错误、循环数据不是
 非映射可迭代对象、表达式无效或展开超过行数上限时抛出 `TemplateError`。
@@ -330,7 +329,7 @@ result = (
 ```python
 workbook = Workbook.load("多表模板.xlsx")
 workbook.render(
-    by_sheet={
+    sheet_data={
         "封面": {
             "title": "2026 年销售报表",
             "customer": {"name": "示例公司"},
@@ -355,7 +354,7 @@ workbook.render(
         "created_at": "#2026-8-1 12:33",
         "title": "公共标题",
     },
-    by_sheet={
+    sheet_data={
         "封面": {"title": "封面标题"},
         "销售明细": {"items": [...]},
     },
@@ -526,7 +525,7 @@ assert len(workbook) == 1
 
 工作表通常由 `Workbook.add_sheet()` 或 `Workbook.active` 获得，不直接构造。
 
-### `Worksheet.label`
+### `Worksheet.name`
 
 功能：读取或修改工作表名称。修改时会校验名称，并同步更新所属 Workbook 的名称
 查询索引；工作表对象、顺序、值、公式和样式不会改变。
@@ -541,13 +540,13 @@ assert len(workbook) == 1
 
 ```python
 worksheet = workbook.add_sheet("原名称")
-worksheet.label = "新名称"
+worksheet.name = "新名称"
 
-assert worksheet.label == "新名称"
+assert worksheet.name == "新名称"
 assert workbook.sheet("新名称") is worksheet
 ```
 
-### `Worksheet.label_color`
+### `Worksheet.color`
 
 功能：读取、设置或清除 Excel 工作表底部标签颜色。
 
@@ -560,12 +559,12 @@ assert workbook.sheet("新名称") is worksheet
 异常：颜色类型、长度或十六进制字符无效时抛出 `ValueError`，原颜色保持不变。
 
 ```python
-worksheet.label_color = "4472c4"
-assert worksheet.label_color == "FF4472C4"
+worksheet.color = "4472c4"
+assert worksheet.color == "FF4472C4"
 
-worksheet.label_color = "804472C4"
-worksheet.label_color = None
-assert worksheet.label_color is None
+worksheet.color = "804472C4"
+worksheet.color = None
+assert worksheet.color is None
 ```
 
 XLSX 保存和加载会保留标签颜色。Excel 97–2003 XLS 的当前 `xlwt` 写出后端没有
@@ -704,7 +703,7 @@ worksheet.range("A1:F1").merge()
 assert tuple(area.address for area in worksheet.merged_ranges) == ("A1:F1",)
 ```
 
-### `Worksheet.freeze`
+### `Worksheet.freeze_panes`
 
 功能：读取、设置或清除冻结窗格。地址表示冻结后左上角第一个仍可滚动的单元格；
 因此 `"A3"` 冻结前两行，`"C1"` 冻结前两列，`"C3"` 同时冻结前两行两列。
@@ -718,12 +717,12 @@ assert tuple(area.address for area in worksheet.merged_ranges) == ("A1:F1",)
 `TypeError`。
 
 ```python
-worksheet.freeze = "A3"
-assert worksheet.freeze == "A3"
-worksheet.freeze = None
+worksheet.freeze_panes = "A3"
+assert worksheet.freeze_panes == "A3"
+worksheet.freeze_panes = None
 ```
 
-### `Worksheet.filter_range`
+### `Worksheet.auto_filter_range`
 
 功能：设置连续矩形区域的自动筛选按钮，或读取、清除现有筛选区域。它只定义
 筛选范围，不在 Python 内存中隐藏不符合条件的数据行。
@@ -735,8 +734,8 @@ worksheet.freeze = None
 异常：单格地址、反向区域或越界地址抛出 `InvalidAddressError`。
 
 ```python
-worksheet.filter_range = "A2:F100"
-worksheet.filter_range = None
+worksheet.auto_filter_range = "A2:F100"
+worksheet.auto_filter_range = None
 ```
 
 ### `Worksheet.show_gridlines`
@@ -1134,13 +1133,17 @@ assert worksheet["A3"].formula is None
 数字格式无效时，在构造对应样式对象时抛出 `TypeError` 或 `ValueError`。
 
 ```python
-from excelkit import Alignment, Border, Fill, Font, Side, Style
+from excelkit.style import Alignment, Border, BorderSide, Fill, Font, Style
 
 title_style = Style(
     font=Font(name="微软雅黑", size=12, bold=True, color="FFFFFF"),
     fill=Fill(color="4472C4"),
-    border=Border(bottom=Side(style="thin", color="000000")),
-    alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+    border=Border(bottom=BorderSide(style=Border.THIN, color="000000")),
+    alignment=Alignment(
+        horizontal=Alignment.HORIZONTAL_CENTER,
+        vertical=Alignment.VERTICAL_CENTER,
+        wrap_text=True,
+    ),
     number_format="0.00",
 )
 worksheet["A1"].style = title_style
@@ -1169,7 +1172,7 @@ assert worksheet["A1"].style is title_style
 
 返回：不可变 `Fill`。
 
-### `Side(style=None, color=None)`
+### `BorderSide(style=None, color=None)`
 
 功能：定义一条边框边。
 
@@ -1177,13 +1180,18 @@ assert worksheet["A1"].style is title_style
 `hair`、`dashDot`、`dashDotDot`、`mediumDashed`、`mediumDashDot`、
 `mediumDashDotDot`、`slantDashDot` 或 `None`；`color` 为颜色。
 
-返回：不可变 `Side`。
+返回：不可变 `BorderSide`。
 
-### `Border(left=Side(), right=Side(), top=Side(), bottom=Side())`
+线型字符串建议使用 `Border` 类常量，以便 IDE 自动补全并避免手写错误：
+`Border.THIN`、`MEDIUM`、`THICK`、`DASHED`、`DOTTED`、`DOUBLE`、`HAIR`、
+`DASH_DOT`、`DASH_DOT_DOT`、`MEDIUM_DASHED`、`MEDIUM_DASH_DOT`、
+`MEDIUM_DASH_DOT_DOT`、`SLANT_DASH_DOT`。
+
+### `Border(left=BorderSide(), right=BorderSide(), top=BorderSide(), bottom=BorderSide())`
 
 功能：组合单元格左、右、上、下四条边。
 
-参数：四个参数都必须是 `Side`。
+参数：四个参数都必须是 `BorderSide`。
 
 返回：不可变 `Border`。
 
@@ -1196,6 +1204,12 @@ assert worksheet["A1"].style is title_style
 `justify`、`distributed`；也都可为 `None`。`wrap_text` 为布尔值。
 
 返回：不可变 `Alignment`。
+
+对齐值建议使用类常量：水平常量为 `HORIZONTAL_GENERAL`、`HORIZONTAL_LEFT`、
+`HORIZONTAL_CENTER`、`HORIZONTAL_RIGHT`、`HORIZONTAL_FILL`、`HORIZONTAL_JUSTIFY`、
+`HORIZONTAL_CENTER_CONTINUOUS`、`HORIZONTAL_DISTRIBUTED`；垂直常量为
+`VERTICAL_TOP`、`VERTICAL_CENTER`、`VERTICAL_BOTTOM`、`VERTICAL_JUSTIFY`、
+`VERTICAL_DISTRIBUTED`。
 
 ### `Style(font=Font(), fill=Fill(), border=Border(), alignment=Alignment(), number_format="General")`
 
@@ -1306,6 +1320,12 @@ worksheet.range("A1:F1").unmerge()
 页面设置从 `worksheet.page` 进入，不另外创建或替换 `PageSettings`。默认值为 A4、
 纵向、100% 缩放、常用厘米边距，不打印网格线和标题。
 
+`PageSettings` 提供常量 `PORTRAIT`、`LANDSCAPE`、`A3`、`A4`、`A5`、`LETTER`、
+`LEGAL`、`DOWN_THEN_OVER` 和 `OVER_THEN_DOWN`，推荐将它们用于赋值：
+`page.orientation = PageSettings.LANDSCAPE`、
+`page.paper_size = PageSettings.A4`、
+`page.print_order = PageSettings.DOWN_THEN_OVER`。
+
 ### `PageSettings.orientation`
 
 功能：读取或设置打印方向。
@@ -1390,7 +1410,7 @@ worksheet.page.black_and_white = True
 worksheet.page.draft = False
 ```
 
-### `PageSettings.order`
+### `PageSettings.print_order`
 
 功能：当打印区域横向和纵向都跨页时，指定页面编号和打印顺序。
 
@@ -1398,7 +1418,7 @@ worksheet.page.draft = False
 再向下。返回：规范字符串。无效值抛出 `ValueError`。
 
 ```python
-worksheet.page.order = "down_then_over"
+worksheet.page.print_order = PageSettings.DOWN_THEN_OVER
 ```
 
 ### `PageMargins(left, right, top, bottom, header, footer)`
@@ -1412,7 +1432,7 @@ worksheet.page.order = "down_then_over"
 返回：不可变 `PageMargins`。错误类型或范围抛出 `TypeError` 或 `ValueError`。
 
 ```python
-from excelkit import PageMargins
+from excelkit.page_setup import PageMargins
 
 worksheet.page.margins = PageMargins(
     left=1.5, right=1.5, top=2.0, bottom=2.0,
@@ -1423,7 +1443,7 @@ worksheet.page.margins = PageMargins(
 `PageSettings.margins` 只接受完整的 `PageMargins`，这样六项设置作为一个不可变值
 整体替换，不会出现部分更新失败。
 
-### `PageSettings.area`
+### `PageSettings.print_area`
 
 功能：读取、设置或清除打印区域。
 
@@ -1431,8 +1451,8 @@ worksheet.page.margins = PageMargins(
 无效区域抛出 `InvalidAddressError`。
 
 ```python
-worksheet.page.area = "A1:F100"
-worksheet.page.area = None
+worksheet.page.print_area = "A1:F100"
+worksheet.page.print_area = None
 ```
 
 ### `PageSettings.repeat_rows` / `repeat_columns`
@@ -1478,7 +1498,7 @@ worksheet.page.print_headings = True
 类型错误抛出 `TypeError`。
 
 ```python
-from excelkit import HeaderFooter
+from excelkit.page_setup import HeaderFooter
 
 page = worksheet.page
 page.header = HeaderFooter(
@@ -1502,7 +1522,7 @@ page.footer = HeaderFooter(
 写入 XLSX/XLS，由打开文件的 Excel、WPS 等应用在打印或预览时解释；显示细节可能
 随应用而异。
 
-| 控制符 | 功能 | 示例 | ExcelKit 0.2.3 |
+| 控制符 | 功能 | 示例 | ExcelKit 0.3.0 |
 |---|---|---|---|
 | `&L` | 后续内容进入左侧区域 | `&L公司` | 自动生成；通常不要手写 |
 | `&C` | 后续内容进入中间区域 | `&C月报` | 自动生成；通常不要手写 |
@@ -1530,7 +1550,7 @@ page.footer = HeaderFooter(
 | `&"+"` | 使用当前主题的标题字体 | `&"+"标题` | 支持，由表格应用解释 |
 | `&"-"` | 使用当前主题的正文字体 | `&"-"正文` | 支持，由表格应用解释 |
 | `&Kxx.Snnn` | 使用主题颜色；`xx` 为 01～12，`S` 为 `+`/`-`，`nnn` 为 000～100 的明暗百分比 | `&K04.+050文字` | XLSX 支持；由表格应用解释 |
-| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.3 不创建图片关系和媒体文件 |
+| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.3.0 不创建图片关系和媒体文件 |
 
 格式开关是切换式的。例如 `&B重要&B普通` 只让“重要”变粗。要显示普通 `&`，必须
 写成 `&&`。`HeaderFooter` 的 `left`、`center`、`right` 已经代表三个区域，所以
@@ -1608,7 +1628,7 @@ assert index_to_column(26) == "AA"
 assert cell_index("C8") == (7, 2)
 ```
 
-### `parse_range(address)`
+### `range_index(address)`
 
 功能：解析连续矩形 A1 区域。
 
@@ -1619,7 +1639,21 @@ assert cell_index("C8") == (7, 2)
 异常：无效或边界反向时抛出 `InvalidAddressError`。
 
 ```python
-assert parse_range("B3:D8") == (2, 1, 7, 3)
+assert range_index("B3:D8") == (2, 1, 7, 3)
+```
+
+### `range_address(min_row, min_column, max_row, max_column)`
+
+功能：把 0-based、先行后列的矩形边界转换为规范 A1 区域地址。
+
+参数：四个整数分别为最小行、最小列、最大行、最大列，均为包含式边界。
+
+返回：单元格地址或区域地址字符串；单格区域返回例如 `"A1"`。
+
+示例：
+
+```python
+assert range_address(2, 1, 7, 3) == "B3:D8"
 ```
 
 ### `cell_address(row, column)`
@@ -1906,14 +1940,14 @@ assert list(store.items()) == [((0, 0), "A1")]
 python -m examples.02_cell_formula
 ```
 
-## 16. 0.2.3 能力边界
+## 16. 0.3.0 能力边界
 
-0.2.3 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
+0.3.0 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
 恢复、页眉页脚图片、普通图片、图表、条件格式、数据验证、Table、筛选条件执行、
 宏对象模型或流式大文件处理。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.3
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.3.0
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -1937,20 +1971,23 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.2.3 API 速查表
+## 18. 0.3.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`sheets`、`active`、`load`、`render`、`save`、`len()` |
-| `Worksheet` | `label`、`label_color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze`、`filter_range`、`show_gridlines`、`page`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
+| `Worksheet` | `name`、`color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`show_gridlines`、`page`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | 四个 0-based 边界、`address`、`values`、`set_values`、`merge`、`unmerge` |
 | 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
-| `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`parse_range`、`cell_address` |
+| `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`range_index`、`range_address`、`cell_address` |
 | `excelkit.errors` | `ExcelKitError`、`InvalidAddressError`、`InvalidWorksheetNameError`、`InvalidFileError`、`TemplateError` |
 
-0.2.x 内保持上述公开名称和参数语义兼容；以下划线开头的属性、方法和模块属于内部
-实现，不纳入稳定性承诺。新增向后兼容能力使用补丁或次版本号；破坏性公开 API
-变更只在新的主版本中进行并写入更新日志。
+0.3.0 起顶层仅保留核心对象；样式、页面、地址和异常分别从 `excelkit.style`、
+`excelkit.page_setup`、`excelkit.address` 和 `excelkit.errors` 导入。`label`、
+`label_color`、`Side`、`freeze`、`filter_range`、`PageSettings.order`、
+`PageSettings.area`、`parse_range` 和 `Workbook.render(by_sheet=...)` 等旧公开名称
+不再提供；升级时应按本手册的新名称迁移。以下划线开头的属性、方法和模块属于内部
+实现，不纳入稳定性承诺。

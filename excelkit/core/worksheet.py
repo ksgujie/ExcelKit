@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 from ..address import (
     cell_address,
     cell_index,
-    parse_range,
+    range_index,
     validate_column_index,
     validate_row_index,
 )
@@ -43,8 +43,8 @@ class Worksheet:
 
     __slots__ = (
         "_workbook",
-        "_label",
-        "_label_color",
+        "_name",
+        "_color",
         "_values",
         "_formulas",
         "_styles",
@@ -67,8 +67,8 @@ class Worksheet:
         返回：无；空表的最大行、列索引均初始化为 ``-1``。
         """
         self._workbook = workbook
-        self._label = name
-        self._label_color: Optional[str] = None
+        self._name = name
+        self._color: Optional[str] = None
         self._values = ValueStore()
         self._formulas: Dict[Tuple[int, int], str] = {}
         self._styles: Dict[Tuple[int, int], Style] = {}
@@ -83,48 +83,48 @@ class Worksheet:
         self._max_column = -1
 
     @property
-    def label(self) -> str:
-        """功能：取得工作表标签名称。
+    def name(self) -> str:
+        """功能：取得工作表名称。
 
-        使用方法：``label = worksheet.label``。
+        使用方法：``name = worksheet.name``。
         参数：无。
         返回：工作表底部标签显示的名称字符串。
         """
-        return self._label
+        return self._name
 
-    @label.setter
-    def label(self, label: str) -> None:
+    @name.setter
+    def name(self, name: str) -> None:
         """功能：重命名工作表并同步所属工作簿的名称索引。
 
-        使用方法：``worksheet.label = '新名称'``。
-        参数：``label`` 为符合 Excel 规则的新标签名称字符串，长度为 1～31。
+        使用方法：``worksheet.name = '新名称'``。
+        参数：``name`` 为符合 Excel 规则的新名称字符串，长度为 1～31。
         返回：``None``；工作表对象、顺序、数据和样式均保持不变。
         异常：名称无效时抛出 ``InvalidWorksheetNameError``；与其他工作表名称
         大小写不敏感重复时抛出 ``ValueError``。
         """
-        self._workbook._rename_sheet(self, label)
+        self._workbook._rename_sheet(self, name)
 
     @property
-    def label_color(self) -> Optional[str]:
+    def color(self) -> Optional[str]:
         """功能：取得工作表标签颜色。
 
-        使用方法：``color = worksheet.label_color``。
+        使用方法：``color = worksheet.color``。
         参数：无，只读时不需要参数；设置颜色使用同名属性设置器。
         返回：8 位大写 ARGB 字符串；没有设置颜色时返回 ``None``。
         """
-        return self._label_color
+        return self._color
 
-    @label_color.setter
-    def label_color(self, color: Optional[str]) -> None:
+    @color.setter
+    def color(self, color: Optional[str]) -> None:
         """功能：设置或清除工作表标签颜色。
 
-        使用方法：``worksheet.label_color = '4472C4'``；赋值 ``None`` 清除颜色。
+        使用方法：``worksheet.color = '4472C4'``；赋值 ``None`` 清除颜色。
         参数：``color`` 为 6 位 ``RRGGBB``、8 位 ``AARRGGBB`` 字符串或
         ``None``；6 位颜色自动补为完全不透明 ARGB。
         返回：``None``。
         异常：颜色类型、长度或十六进制字符无效时抛出 ``ValueError``。
         """
-        self._label_color = _color(color)
+        self._color = _color(color)
 
     def cell(self, row: Union[str, int], column: Optional[int] = None) -> Cell:
         """功能：按 A1 地址或 0-based 行列索引取得单元格。
@@ -157,7 +157,7 @@ class Worksheet:
         返回：对应的 :class:`Range`。
         异常：地址、边界或方向无效时抛出 ``InvalidAddressError``。
         """
-        return Range(self, *parse_range(address))
+        return Range(self, *range_index(address))
 
     def row(self, index: int) -> RowDimension:
         """功能：按0-based索引取得可设置行高和隐藏状态的行对象。
@@ -196,20 +196,20 @@ class Worksheet:
         return tuple(Range(self, *bounds) for bounds in self._merged_ranges)
 
     @property
-    def freeze(self) -> Optional[str]:
+    def freeze_panes(self) -> Optional[str]:
         """功能：读取冻结窗格后的第一个可滚动单元格地址。
 
-        使用方法：``address = worksheet.freeze``。
+        使用方法：``address = worksheet.freeze_panes``。
         参数：无。
         返回：大写A1地址或没有冻结窗格时的 ``None``。
         """
         return self._freeze
 
-    @freeze.setter
-    def freeze(self, address: Optional[str]) -> None:
+    @freeze_panes.setter
+    def freeze_panes(self, address: Optional[str]) -> None:
         """功能：设置或清除冻结行列。
 
-        使用方法：``worksheet.freeze = "B2"`` 冻结第一行和第一列；赋值
+        使用方法：``worksheet.freeze_panes = "B2"`` 冻结第一行和第一列；赋值
         ``None`` 或 ``"A1"`` 清除冻结。
         参数：``address`` 为第一个可滚动单元格的A1地址或 ``None``。
         返回：``None``。
@@ -222,20 +222,20 @@ class Worksheet:
         self._freeze = None if (row, column) == (0, 0) else cell_address(row, column)
 
     @property
-    def filter_range(self) -> Optional[str]:
+    def auto_filter_range(self) -> Optional[str]:
         """功能：读取工作表自动筛选区域。
 
-        使用方法：``address = worksheet.filter_range``。
+        使用方法：``address = worksheet.auto_filter_range``。
         参数：无。
         返回：大写A1矩形区域或未启用筛选时的 ``None``。
         """
         return self._filter_range
 
-    @filter_range.setter
-    def filter_range(self, address: Optional[str]) -> None:
+    @auto_filter_range.setter
+    def auto_filter_range(self, address: Optional[str]) -> None:
         """功能：设置或清除一块连续区域的自动筛选按钮。
 
-        使用方法：``worksheet.filter_range = "A1:F100"``；赋值 ``None`` 清除。
+        使用方法：``worksheet.auto_filter_range = "A1:F100"``；赋值 ``None`` 清除。
         参数：``address`` 为合法A1矩形区域字符串或 ``None``。
         返回：``None``。
         异常：地址无效时抛出 ``InvalidAddressError``。
@@ -243,7 +243,7 @@ class Worksheet:
         if address is None:
             self._filter_range = None
             return
-        self._filter_range = Range(self, *parse_range(address)).address
+        self._filter_range = Range(self, *range_index(address)).address
 
     @property
     def show_gridlines(self) -> bool:
@@ -588,4 +588,4 @@ class Worksheet:
         参数：无。
         返回：包含工作表名称的字符串。
         """
-        return f"<Worksheet {self._label!r}>"
+        return f"<Worksheet {self._name!r}>"
