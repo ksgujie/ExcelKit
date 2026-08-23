@@ -24,6 +24,14 @@ def main() -> None:
     assert (worksheet["A3"].row, worksheet["A3"].column) == (2, 0)
     assert worksheet["A3"].index == (2, 0)
     assert worksheet["A3"].address == "A3"
+    formula = worksheet["A3"].formula
+    worksheet["A3"].formula = None
+    assert worksheet["A3"].formula is None
+    worksheet["A3"].formula = formula
+
+    snapshot = worksheet["A1"].read()
+    worksheet["A1"] = 99
+    assert snapshot.value == 10
 
     output = Path("02_cell_formula.xlsx")
     workbook.save(output)

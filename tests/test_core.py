@@ -25,7 +25,7 @@ class WorkbookTests(unittest.TestCase):
         self.assertIs(workbook.active, active)
 
     def test_sheet_supports_name_and_zero_based_index(self):
-        """功能：验证 sheet 的名称查询和 0-based 正负索引查询。
+        """功能：验证 sheet 的标签查询和非负 0-based 索引查询。
 
         使用方法：由 unittest 自动发现执行。
         参数：无。
@@ -35,9 +35,11 @@ class WorkbookTests(unittest.TestCase):
         first = workbook.add_sheet("第一张")
         second = workbook.add_sheet("第二张")
         self.assertIs(workbook.sheet("第一张"), first)
+        self.assertIs(workbook.sheet("第一张".lower()), first)
         self.assertIs(workbook.sheet(0), first)
         self.assertIs(workbook.sheet(1), second)
-        self.assertIs(workbook.sheet(-1), second)
+        with self.assertRaises(IndexError):
+            workbook.sheet(-1)
         with self.assertRaises(KeyError):
             workbook.sheet("不存在")
         with self.assertRaises(IndexError):
@@ -53,7 +55,9 @@ class WorkbookTests(unittest.TestCase):
         返回：无；断言失败时由测试框架报告。
         """
         workbook = Workbook()
-        workbook.add_sheet("Data")
+        data = workbook.add_sheet("Data")
+        self.assertIs(workbook.sheet("data"), data)
+        self.assertIs(workbook.sheet("DATA"), data)
         with self.assertRaises(ValueError):
             workbook.add_sheet("data")
         for name in ("", "x" * 32, "bad/name", "bad\x00name", 123):
@@ -83,6 +87,7 @@ class WorkbookTests(unittest.TestCase):
             first.label = ""
         self.assertEqual(first.label, "新名称")
         first.label = "NewName"
+        self.assertIs(workbook.sheet("newname"), first)
         first.label = "newname"
         self.assertEqual(first.label, "newname")
         self.assertIs(workbook.sheet("newname"), first)
@@ -151,7 +156,10 @@ class WorksheetTests(unittest.TestCase):
         cell.value = 100
         self.assertEqual(cell.value, 100)
         self.assertIsNone(cell.formula)
-        for invalid in ("", "=", "   ", None, 123):
+        cell.formula = "=1+1"
+        cell.formula = None
+        self.assertIsNone(cell.formula)
+        for invalid in ("", "=", "   ", 123):
             with self.subTest(invalid=invalid), self.assertRaises(TypeError):
                 cell.formula = invalid
 
@@ -173,6 +181,22 @@ class WorksheetTests(unittest.TestCase):
         ])
         self.assertEqual((self.worksheet.max_row, self.worksheet.max_column), (2, 1))
         self.assertFalse(hasattr(self.worksheet, "append_many"))
+
+    def test_append_and_append_rows_validate_before_writing(self):
+        """功能：验证单行和多行追加失败时不会留下部分写入数据。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言转换错误发生前后工作表数据完全一致。
+        """
+        self.worksheet.append(["原值"])
+        before = self.worksheet.values
+        with self.assertRaises(ValueError):
+            self.worksheet.append([1, "#2026-99-1"])
+        self.assertEqual(self.worksheet.values, before)
+        with self.assertRaises(ValueError):
+            self.worksheet.append_rows([[1], ["#2026-99-1"]])
+        self.assertEqual(self.worksheet.values, before)
 
     def test_range_indexes_values_and_formula_overwrite(self):
         """功能：验证 Range 边界为 0-based，普通值读取不返回公式。
@@ -324,8 +348,11 @@ class WorksheetTests(unittest.TestCase):
         cell.value = "7"
         snapshot = cell.read()
         cell.value = "8"
+        self.assertEqual(snapshot.value, "7")
         self.assertEqual(snapshot.as_int(), 7)
         self.assertEqual(cell.value, "8")
+        with self.assertRaises(AttributeError):
+            snapshot.value = "9"
 
     def test_worksheet_values_and_cell_style(self):
         """功能：验证工作表全部值属性和不可变单元格样式。

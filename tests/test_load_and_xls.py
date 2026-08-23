@@ -236,6 +236,21 @@ class LoadAndFormatTests(unittest.TestCase):
         with self.assertRaises(InvalidFileError):
             Workbook.load(filename)
 
+    def test_save_rejects_unsupported_extensions_without_mutating_workbook(self):
+        """功能：验证保存只接受 XLSX 和 XLS，错误扩展名不会创建工作表或文件。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言错误类型、文件状态和空工作簿状态。
+        """
+        workbook = Workbook()
+        for suffix in (".csv", ".xlsm", ".bin", ""):
+            filename = self.directory / f"invalid{suffix}"
+            with self.subTest(suffix=suffix), self.assertRaises(InvalidFileError):
+                workbook.save(filename)
+            self.assertFalse(filename.exists())
+            self.assertEqual(workbook.sheets, ())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,14 +1,14 @@
-# ExcelKit 0.2.2
+# ExcelKit 0.2.3
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.2.2 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.2.3 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.2.2-py3-none-any.whl
+pip install excelkit-0.2.3-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -52,7 +52,7 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 
 - `Workbook()`：创建空工作簿。
 - `add_sheet(name)`：创建并返回工作表。
-- `sheet(name_or_index)`：按名称或 0-based 索引返回工作表；负索引遵循 Python 规则。
+- `sheet(name_or_index)`：按不区分大小写的标签或非负 0-based 索引返回工作表。
 - `remove_sheet(name_or_index)`：删除工作表并返回当前工作簿。
 - `move_sheet(name_or_index, index)`：移动到指定 0-based 最终位置。
 - `copy_sheet(name_or_index, new_name)`：完整复制内容、布局和打印设置。
@@ -61,7 +61,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `Workbook.load(filename)`：读取 XLS、XLSX、XLSM、XLTX、CSV 或 TSV。
 - `render(data=None, *, by_sheet=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
-- `save(filename)`：按扩展名保存 XLSX 或 XLS，并返回当前工作簿。
+- `save(filename)`：只按 `.xlsx` 或 `.xls` 扩展名保存并返回当前工作簿；其他
+  扩展名抛出 `InvalidFileError`。
 
 ### Worksheet
 
@@ -70,7 +71,7 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `worksheet.cell(row, column)`：0-based 动态行列访问，先行后列。
 - `worksheet.range("A1:C10")`：创建连续矩形区域。
 - `append(values)`：追加一行；空表从索引 0、即 A1 开始。
-- `append_rows(rows)`：连续追加二维数据。
+- `append_rows(rows)`：原子校验并连续追加二维数据。
 - `values`：返回从 A1 到已触及边界的全部普通值二维列表。
 - `max_row`、`max_column`：已经触及的最大 0-based 索引；空表为 `-1`。
 - `label`：读取或设置工作表标签名称；设置时同步 Workbook 名称索引。
@@ -102,12 +103,12 @@ assert worksheet.label_color == "FF4472C4"
 - `index`：以只读 `(row, column)` 元组一次返回 0-based 行列索引。
 - `address`：对应的规范化 A1 地址。
 - `value`：普通值；写入普通值会清除同位置的公式。
-- `formula`：公式；可包含或省略 `=`，读取时始终带 `=`；写入公式会清除普通值。
+- `formula`：公式；可包含或省略 `=`，读取时始终带 `=`；赋值 `None` 清除公式。
 - `style`：完整不可变样式，支持字体、填充、边框、对齐和数字格式。
 - `set_value(value)`：写入值并返回当前 Cell，用于链式类型转换。
 - `as_string()`、`as_int()`、`as_float()`、`as_bool()`、`as_date()`、
   `as_datetime()`：转换、写回并直接返回目标类型。
-- `read()`：取得只读值快照，随后使用同一组 `as_*()` 但不写回。
+- `read()`：取得只读值快照，可读取 `.value` 或使用同一组 `as_*()` 而不写回。
 
 ExcelKit 只保存公式表达式，不在 Python 中计算公式。
 
@@ -350,7 +351,7 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.2.2 能力边界
+## 0.2.3 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存、区域批量写入、基础样式、模板

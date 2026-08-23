@@ -63,6 +63,11 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         self.assertEqual(source.row(0).height, 28)
         self.assertEqual(source.page.header.center, "报表")
 
+        source["D4"] = {"items": [1]}
+        independent = workbook.copy_sheet("模板", "独立值副本")
+        independent["D4"].value["items"].append(2)
+        self.assertEqual(source["D4"].value, {"items": [1]})
+
 
 class WorksheetLayoutTests(unittest.TestCase):
     """验证合并区域、行列尺寸、冻结、筛选和网格线。"""
@@ -165,6 +170,8 @@ class PageSettingsTests(unittest.TestCase):
             page.fit(width=None, height=None)
         with self.assertRaises(ValueError):
             page.scale = 5
+        with self.assertRaises(ValueError):
+            page.scale = None
 
     def test_print_area_titles_margins_headers_and_flags(self):
         """功能：验证打印区域、0-based重复标题、厘米边距和页眉页脚。

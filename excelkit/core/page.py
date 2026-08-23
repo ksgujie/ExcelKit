@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Optional, Tuple, cast
 
@@ -180,13 +181,15 @@ class PageSettings:
                 raise ValueError("paper_size 必须是 A3、A4、A5、Letter 或 Legal")
             value = _PAPER_SIZES[value.casefold()]
         elif name == "scale":
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or not 10 <= value <= 400
+            if (
+                value is None
+                or isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 10 <= value <= 400
             ):
-                raise ValueError("scale 必须是10～400的整数或 None")
-            if value is not None:
-                object.__setattr__(self, "_fit_width", None)
-                object.__setattr__(self, "_fit_height", None)
+                raise ValueError("scale 必须是10～400的整数；适应页数请使用 fit()")
+            object.__setattr__(self, "_fit_width", None)
+            object.__setattr__(self, "_fit_height", None)
         elif name == "first_page_number":
             if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int) or value <= 0
@@ -247,6 +250,20 @@ class PageSettings:
         object.__setattr__(self, "_fit_width", width)
         object.__setattr__(self, "_fit_height", height)
         return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> "PageSettings":
+        """功能：完整复制页面公开配置和内部缩放模式状态。
+
+        使用方法：由 ``Workbook.copy_sheet()`` 通过 ``deepcopy(page)`` 自动调用。
+        参数：``memo`` 为 Python 深复制协议维护的对象映射。
+        返回：与当前对象状态相同、后续可独立修改的新 :class:`PageSettings`。
+        异常：嵌套值无法深复制时透传对应异常；不会修改原页面设置。
+        """
+        copied = object.__new__(type(self))
+        memo[id(self)] = copied
+        for name in self.__slots__:
+            object.__setattr__(copied, name, deepcopy(getattr(self, name), memo))
+        return copied
 
     def __repr__(self) -> str:
         """功能：生成用于调试的页面设置文本表示。

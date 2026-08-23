@@ -1,6 +1,6 @@
-# ExcelKit 0.2.2 完整中文使用与 API 手册
+# ExcelKit 0.2.3 完整中文使用与 API 手册
 
-版本：0.2.2
+版本：0.2.3
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,7 +8,7 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.2.2-py3-none-any.whl
+pip install excelkit-0.2.3-py3-none-any.whl
 ```
 
 稳定核心对象从顶层导入：
@@ -66,7 +66,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.2.2"
+assert excelkit.__version__ == "0.2.3"
 ```
 
 ## 4. Workbook 工作簿
@@ -111,12 +111,13 @@ summary = workbook.add_sheet("统计")
 
 ### `Workbook.sheet(name_or_index)`
 
-功能：按名称或创建顺序索引取得工作表。两种查询由同一方法完成。
+功能：按标签或创建顺序索引取得工作表。两种查询由同一方法完成；字符串查询
+不区分大小写。
 
 参数：
 
-- `name_or_index: str | int`：字符串按名称查询；整数按 0-based 索引查询。
-  整数支持 Python 负索引，例如 `-1` 表示最后一张。布尔值不作为整数索引。
+- `name_or_index: str | int`：字符串按标签查询且不区分大小写；整数按非负
+  0-based 索引查询。负数和布尔值都不是有效索引。
 
 返回：匹配的 `Worksheet`。
 
@@ -128,7 +129,10 @@ summary = workbook.add_sheet("统计")
 ```python
 assert workbook.sheet("成绩") is scores
 assert workbook.sheet(0) is scores
-assert workbook.sheet(-1) is summary
+
+data = workbook.add_sheet("Data")
+assert workbook.sheet("data") is data
+assert workbook.sheet("DATA") is data
 ```
 
 ### `Workbook.remove_sheet(name_or_index)`
@@ -139,8 +143,8 @@ assert workbook.sheet(-1) is summary
 
 参数：
 
-- `name_or_index: str | int`：字符串按标签名称查找；整数按当前顺序查找，允许
-  Python 负索引。布尔值不作为整数。
+- `name_or_index: str | int`：字符串按标签查找且不区分大小写；整数按当前顺序
+  查找，只接受非负 0-based 整数。
 
 返回：当前 `Workbook`，可继续链式调用。
 
@@ -180,7 +184,7 @@ assert tuple(sheet.label for sheet in workbook.sheets) == ("三", "一", "二")
 
 ### `Workbook.copy_sheet(name_or_index, new_name)`
 
-功能：复制一张工作表，并将副本追加到工作簿末尾。普通值、公式、不可变单元格
+功能：复制一张工作表，并将副本追加到工作簿末尾。普通值（包括嵌套可变对象）、公式、不可变单元格
 样式、标签颜色、行列尺寸、合并区域、冻结窗格、筛选、网格线以及全部页面设置
 都会复制；副本之后可以独立修改，不会反向影响源表。
 
@@ -266,7 +270,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.2.2 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.2.3 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, by_sheet=None, strict=False)`
 
@@ -480,13 +484,14 @@ Table 引用、动态数组或需要自动扩张合计区域的场景，应在�
 
 参数：
 
-- `filename: str | os.PathLike`：目标文件路径；`.xls` 选择 Excel 97–2003
-  二进制格式，其他扩展名按 XLSX 写出；父目录必须存在。
+- `filename: str | os.PathLike`：目标文件路径；只接受 `.xlsx` 或 `.xls`，扩展名
+  不区分大小写；父目录必须存在。
 
 返回：当前 `Workbook`，可以链式调用。
 
-异常：路径类型错误时抛出 `TypeError`；父目录不存在、无权限或文件系统失败时透传
-对应异常。
+异常：路径类型错误时抛出 `TypeError`；扩展名不是 `.xlsx` 或 `.xls` 时抛出
+`InvalidFileError`，且不会创建文件或延迟创建 `Sheet1`；父目录不存在、无权限或
+文件系统失败时透传对应异常。
 
 示例：
 
@@ -804,7 +809,8 @@ assert worksheet.max_column == 5
 返回：当前 `Worksheet`。
 
 异常：参数不是适当可迭代对象时抛出 `TypeError`；超过 Excel 上限时抛出
-`InvalidAddressError`。
+`InvalidAddressError`。整行会先完成结构、边界和日期字面量转换验证，失败时不会
+留下部分单元格。
 
 ```python
 worksheet.append(["姓名", "成绩"])
@@ -813,7 +819,8 @@ worksheet.append(["张三", 95])
 
 ### `Worksheet.append_rows(rows)`
 
-功能：连续追加二维普通值数据，内部逐行使用 `append()`。
+功能：连续追加二维普通值数据，写入实现统一委托给 `append()`。所有输入行会先
+完成验证，验证全部成功后才开始修改工作表。
 
 参数：
 
@@ -822,7 +829,8 @@ worksheet.append(["张三", 95])
 返回：当前 `Worksheet`。
 
 异常：数据结构无效时抛出 `TypeError`；超出 Excel 上限时抛出
-`InvalidAddressError`。前面已经成功写入的行不会回滚。
+`InvalidAddressError`；日期字面量无效时抛出 `ValueError`。任何失败都不会留下
+前置行或部分单元格。
 
 ```python
 worksheet.append_rows([
@@ -1050,7 +1058,25 @@ worksheet["A3"].set_value("2026/8/1 12:33").as_datetime()
 worksheet["A1"].value = "123"
 snapshot = worksheet["A1"].read()
 worksheet["A1"].value = "456"
+assert snapshot.value == "123"
 assert snapshot.as_int() == 123
+```
+
+### `CellValue.value`
+
+功能：返回创建快照时读取到的原始普通值，不进行类型转换，也不会写回工作表。
+
+参数：无，只读属性；不允许对 `snapshot.value` 赋值。
+
+返回：原始 Python 值；空单元格或公式单元格返回 `None`。
+
+```python
+worksheet["A1"].value = "123"
+snapshot = worksheet["A1"].read()
+worksheet["A1"].value = "456"
+
+assert snapshot.value == "123"
+assert worksheet["A1"].value == "456"
 ```
 
 ### `CellValue.as_string()` / `as_int()` / `as_float()` / `as_bool()` / `as_date()` / `as_datetime()`
@@ -1076,10 +1102,10 @@ API 只保留语义明确的 `as_string()`，不提供 `as_str()`；也不提供
 
 ### `Cell.formula`
 
-功能：读取或设置公式。写入公式会清除同一位置的普通值。ExcelKit 保存表达式，
-不计算结果。
+功能：读取、设置或清除公式。写入公式会清除同一位置的普通值；赋值 `None` 清除
+公式。ExcelKit 保存表达式，不计算结果。
 
-参数：写入值必须是包含表达式的非空 `str`；前导 `=` 可省略。
+参数：写入值为包含表达式的非空 `str` 或 `None`；前导 `=` 可省略。
 
 返回：读取时返回带前导 `=` 的标准化公式；无公式时返回 `None`。
 
@@ -1091,6 +1117,8 @@ worksheet["A2"] = 20
 worksheet["A3"].formula = "SUM(A1:A2)"
 assert worksheet["A3"].formula == "=SUM(A1:A2)"
 assert worksheet["A3"].value is None
+worksheet["A3"].formula = None
+assert worksheet["A3"].formula is None
 ```
 
 ### `Cell.style`
@@ -1308,9 +1336,11 @@ worksheet.page.paper_size = "A4"
 功能：读取或设置打印缩放百分比。设置具体百分比会自动清除先前的适应页数设置，
 避免两套互斥配置同时生效。
 
-参数：10～400 的整数或 `None`；布尔值无效。
+参数：设置时只接受 10～400 的整数，布尔值和 `None` 无效；切换到适应页数模式
+必须使用 `fit()`，避免产生缺少页数目标的中间状态。
 
-返回：读取时为 `int | None`；设置时为 `None`。范围无效抛出 `ValueError`。
+返回：读取时为 `int | None`；适应页数模式下读取为 `None`，但不能直接赋值
+`None`。设置时返回 `None`，范围无效抛出 `ValueError`。
 
 ```python
 worksheet.page.scale = 90
@@ -1472,7 +1502,7 @@ page.footer = HeaderFooter(
 写入 XLSX/XLS，由打开文件的 Excel、WPS 等应用在打印或预览时解释；显示细节可能
 随应用而异。
 
-| 控制符 | 功能 | 示例 | ExcelKit 0.2.2 |
+| 控制符 | 功能 | 示例 | ExcelKit 0.2.3 |
 |---|---|---|---|
 | `&L` | 后续内容进入左侧区域 | `&L公司` | 自动生成；通常不要手写 |
 | `&C` | 后续内容进入中间区域 | `&C月报` | 自动生成；通常不要手写 |
@@ -1500,7 +1530,7 @@ page.footer = HeaderFooter(
 | `&"+"` | 使用当前主题的标题字体 | `&"+"标题` | 支持，由表格应用解释 |
 | `&"-"` | 使用当前主题的正文字体 | `&"-"正文` | 支持，由表格应用解释 |
 | `&Kxx.Snnn` | 使用主题颜色；`xx` 为 01～12，`S` 为 `+`/`-`，`nnn` 为 000～100 的明暗百分比 | `&K04.+050文字` | XLSX 支持；由表格应用解释 |
-| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.2 不创建图片关系和媒体文件 |
+| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.3 不创建图片关系和媒体文件 |
 
 格式开关是切换式的。例如 `&B重要&B普通` 只让“重要”变粗。要显示普通 `&`，必须
 写成 `&&`。`HeaderFooter` 的 `left`、`center`、`right` 已经代表三个区域，所以
@@ -1876,14 +1906,14 @@ assert list(store.items()) == [((0, 0), "A1")]
 python -m examples.02_cell_formula
 ```
 
-## 16. 0.2.2 能力边界
+## 16. 0.2.3 能力边界
 
-0.2.2 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
+0.2.3 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
 恢复、页眉页脚图片、普通图片、图表、条件格式、数据验证、Table、筛选条件执行、
 宏对象模型或流式大文件处理。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.2
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.3
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -1907,14 +1937,14 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.2.2 API 速查表
+## 18. 0.2.3 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`sheets`、`active`、`load`、`render`、`save`、`len()` |
 | `Worksheet` | `label`、`label_color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze`、`filter_range`、`show_gridlines`、`page`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`style`、`set_value`、`read`、六种 `as_*` |
-| `CellValue` | `as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
+| `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | 四个 0-based 边界、`address`、`values`、`set_values`、`merge`、`unmerge` |
 | 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |

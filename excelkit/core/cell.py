@@ -34,6 +34,16 @@ class CellValue:
         """
         self._value = value
 
+    @property
+    def value(self) -> Any:
+        """功能：取得创建快照时读取到的原始普通值。
+
+        使用方法：``raw_value = cell.read().value``。
+        参数：无；本属性只读，不会把任何内容写回原单元格。
+        返回：快照保存的原始 Python 值；空单元格或公式单元格返回 ``None``。
+        """
+        return self._value
+
     def as_string(self) -> str:
         """功能：只读转换快照为字符串，不修改原单元格。
 
@@ -287,14 +297,14 @@ class Cell:
         return self._worksheet._get_formula(self._row, self._column)
 
     @formula.setter
-    def formula(self, formula: str) -> None:
-        """功能：设置单元格公式并清除同一位置的普通值。
+    def formula(self, formula: Optional[str]) -> None:
+        """功能：设置或清除单元格公式；设置公式会清除同一位置的普通值。
 
         使用方法：``worksheet["D2"].formula = "=SUM(B2:C2)"``；开头的 ``=``
-        可以省略。
-        参数：``formula`` 必须是包含表达式的非空字符串。
+        可以省略；``worksheet["D2"].formula = None`` 清除公式。
+        参数：``formula`` 为包含表达式的非空字符串或 ``None``。
         返回：``None``。
-        异常：公式类型或内容无效时抛出 ``TypeError``。
+        异常：非空公式的类型或内容无效时抛出 ``TypeError``。
         """
         self._worksheet._set_formula(self._row, self._column, formula)
 

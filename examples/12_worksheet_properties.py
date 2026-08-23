@@ -6,7 +6,7 @@ from excelkit import Workbook
 
 
 def main() -> None:
-    """功能：演示重命名工作表、名称查询同步和 XLSX 标签颜色保存。
+    """功能：演示重命名工作表、标签查询同步和 XLSX 标签颜色保存。
 
     使用方法：在项目根目录执行 ``python -m examples.12_worksheet_properties``。
     参数：无。

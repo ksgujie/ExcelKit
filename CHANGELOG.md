@@ -1,5 +1,16 @@
 # 更新日志
 
+## 0.2.3 - 2026-08-23
+
+- 工作表标签查询改为大小写不敏感，并让所有公开工作表整数索引统一拒绝负数。
+- `Workbook.save()` 只接受 `.xlsx` 和 `.xls`，错误扩展名抛出
+  `InvalidFileError`，不会创建伪装格式文件或改变空工作簿。
+- `append()`、`append_rows()` 改为写入前完整验证，失败不再留下部分数据。
+- `copy_sheet()` 深复制嵌套可变普通值，并保持页面适应页数模式可独立复制。
+- `PageSettings.scale` 禁止直接设置 `None`；适应页数统一通过 `fit()` 切换。
+- `CellValue` 增加只读 `value`；`Cell.formula = None` 可直接清除公式。
+- 更新完整中文 API 手册、README、示例和自动化回归测试。
+
 ## 0.2.2 - 2026-08-23
 
 - `Cell` 增加只读 `index` 属性，以先行后列的 `(row, column)` 元组返回 0-based

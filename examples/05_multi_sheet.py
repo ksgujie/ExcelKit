@@ -1,4 +1,4 @@
-"""多工作表创建、名称查询和 0-based 索引查询示例。"""
+"""多工作表创建、标签查询和非负 0-based 索引查询示例。"""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from excelkit import Workbook
 
 
 def main() -> None:
-    """功能：创建多张工作表并演示名称、正索引和负索引查询。
+    """功能：创建多张工作表并演示标签和非负 0-based 索引查询。
 
     使用方法：在项目根目录执行 ``python -m examples.05_multi_sheet``。
     参数：无。
@@ -23,8 +23,8 @@ def main() -> None:
 
     assert workbook.sheet(0) is students
     assert workbook.sheet(1) is scores
-    assert workbook.sheet(-1) is summary
     assert workbook.sheet("成绩") is scores
+    assert workbook.sheet("统计") is summary
 
     output = Path("05_multi_sheet.xlsx")
     workbook.save(output)

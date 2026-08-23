@@ -313,6 +313,24 @@ class Worksheet:
         end_address = cell_address(self._max_row, self._max_column)
         return self.range(f"A1:{end_address}").values
 
+    @staticmethod
+    def _prepare_append_row(values: Iterable[Any], method_name: str) -> list[Any]:
+        """功能：完整读取并规范化一行待追加数据。
+
+        使用方法：由 ``append()`` 和 ``append_rows()`` 在写入前共同调用。
+        参数：``values`` 为一维可迭代数据；``method_name`` 用于生成明确错误消息。
+        返回：已经完成日期字面量转换的普通值列表。
+        异常：整行是字符串、字节或不可迭代对象时抛出 ``TypeError``；值转换失败
+        时透传相应异常，工作表尚未发生改变。
+        """
+        if isinstance(values, (str, bytes)):
+            raise TypeError(f"{method_name} 需要一维行数据，不能直接传入字符串或字节对象")
+        try:
+            row_values = list(values)
+        except TypeError as error:
+            raise TypeError(f"{method_name} 需要一维可迭代对象") from error
+        return [_normalize_value(value) for value in row_values]
+
     def append(self, values: Iterable[Any]) -> "Worksheet":
         """功能：在当前最大行索引之后追加一行普通值。
 
@@ -321,20 +339,20 @@ class Worksheet:
         字符串和字节对象不能作为整行数据，空可迭代对象不会触及新行。
         返回：当前 :class:`Worksheet`，支持链式调用。
         异常：参数不可迭代或是字符串、字节对象时抛出 ``TypeError``；数据超过
-        Excel 行列上限时抛出 ``InvalidAddressError``。
+        Excel 行列上限时抛出 ``InvalidAddressError``；值转换失败或目标位于合并
+        区域非左上角时保持整行写入前状态。
         """
-        if isinstance(values, (str, bytes)):
-            raise TypeError("append() 需要一维行数据，不能直接传入字符串或字节对象")
-        try:
-            row_values = list(values)
-        except TypeError as error:
-            raise TypeError("append() 需要一维可迭代对象") from error
+        row_values = self._prepare_append_row(values, "append()")
         if not row_values:
             return self
 
         target_row = self._max_row + 1
         validate_row_index(target_row)
         validate_column_index(len(row_values) - 1)
+        for column in range(len(row_values)):
+            anchor = self._merged_anchor(target_row, column)
+            if anchor is not None and anchor != (target_row, column):
+                raise ValueError("不能向合并区域的非左上角单元格追加值")
         for column, value in enumerate(row_values):
             self._set_value(target_row, column, value)
         return self
@@ -343,19 +361,38 @@ class Worksheet:
         """功能：按给定顺序连续追加多行普通值。
 
         使用方法：``worksheet.append_rows([["张三", 90], ["李四", 88]])``。
-        参数：``rows`` 为二维可迭代对象；每个元素会作为一行传给 :meth:`append`。
+        参数：``rows`` 为二维可迭代对象；每个非空元素会作为一行传给
+        :meth:`append`，空行与单行 ``append([])`` 一样不会推进位置。
         返回：当前 :class:`Worksheet`，支持链式调用。
         异常：外层或任一行不可迭代时抛出 ``TypeError``；超过 Excel 上限时抛出
-        ``InvalidAddressError``。已经成功追加的前置行不会回滚。
+        ``InvalidAddressError``。全部行和值会在首次写入前完成验证，任何失败都不会
+        留下前置行或部分单元格。
         """
         if isinstance(rows, (str, bytes)):
             raise TypeError("append_rows() 需要二维数据，不能直接传入字符串或字节对象")
         try:
-            iterator = iter(rows)
+            input_rows = list(rows)
         except TypeError as error:
             raise TypeError("append_rows() 需要二维可迭代对象") from error
-        for values in iterator:
-            self.append(values)
+        prepared_rows = [
+            self._prepare_append_row(values, "append_rows()")
+            for values in input_rows
+        ]
+        prepared_rows = [values for values in prepared_rows if values]
+        if not prepared_rows:
+            return self
+
+        first_row = self._max_row + 1
+        validate_row_index(first_row + len(prepared_rows) - 1)
+        for row_offset, row_values in enumerate(prepared_rows):
+            validate_column_index(len(row_values) - 1)
+            target_row = first_row + row_offset
+            for column in range(len(row_values)):
+                anchor = self._merged_anchor(target_row, column)
+                if anchor is not None and anchor != (target_row, column):
+                    raise ValueError("不能向合并区域的非左上角单元格追加值")
+        for row_values in prepared_rows:
+            self.append(row_values)
         return self
 
     def _touch(self, row: int, column: int) -> None:
@@ -462,16 +499,23 @@ class Worksheet:
         validate_column_index(column)
         return self._formulas.get((row, column))
 
-    def _set_formula(self, row: int, column: int, formula: str) -> None:
-        """功能：校验并设置公式，同时清除同一位置的普通值。
+    def _set_formula(
+        self, row: int, column: int, formula: Optional[str]
+    ) -> None:
+        """功能：校验并设置公式，或使用 ``None`` 清除现有公式。
 
         使用方法：通过 ``worksheet["A1"].formula = "=SUM(B1:B5)"`` 间接调用。
         参数：``row``、``column`` 为 0-based 整数索引，顺序为先行后列；
-        ``formula`` 为非空字符串，可以包含或省略开头的 ``=``。
-        返回：``None``；内部统一保存为带前导 ``=`` 的字符串。
-        异常：公式不是字符串、为空或只有 ``=`` 时抛出 ``TypeError``；索引无效时
-        抛出 ``InvalidAddressError``。
+        ``formula`` 为非空字符串或 ``None``，字符串可以包含或省略开头的 ``=``。
+        返回：``None``；字符串统一保存为带前导 ``=`` 的形式，``None`` 仅删除公式。
+        异常：非空公式不是字符串、为空或只有 ``=`` 时抛出 ``TypeError``；索引
+        无效时抛出 ``InvalidAddressError``。
         """
+        validate_row_index(row)
+        validate_column_index(column)
+        if formula is None:
+            self._formulas.pop((row, column), None)
+            return
         anchor = self._merged_anchor(row, column)
         if anchor is not None and anchor != (row, column):
             raise ValueError("只能向合并区域的左上角单元格写入公式")

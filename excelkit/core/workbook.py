@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
-from ..errors import InvalidWorksheetNameError
+from ..errors import InvalidFileError, InvalidWorksheetNameError
 from .worksheet import Worksheet
 
 _FORBIDDEN_SHEET_NAME_CHARS = frozenset(":\\/?*[]")
@@ -67,13 +68,12 @@ class Workbook:
         重复（不区分大小写）时抛出 ``ValueError``。
         """
         self._validate_sheet_name(name)
-        if name in self._sheets_by_name or any(
-            existing.label.casefold() == name.casefold() for existing in self._sheets
-        ):
+        normalized_name = name.casefold()
+        if normalized_name in self._sheets_by_name:
             raise ValueError(f"Worksheet already exists: {name!r}")
         worksheet = Worksheet(self, name)
         self._sheets.append(worksheet)
-        self._sheets_by_name[name] = worksheet
+        self._sheets_by_name[normalized_name] = worksheet
         return worksheet
 
     def _rename_sheet(self, worksheet: Worksheet, name: str) -> None:
@@ -91,29 +91,34 @@ class Workbook:
         self._validate_sheet_name(name)
         if worksheet.label == name:
             return
-        if any(
-            existing is not worksheet and existing.label.casefold() == name.casefold()
-            for existing in self._sheets
-        ):
+        normalized_name = name.casefold()
+        existing = self._sheets_by_name.get(normalized_name)
+        if existing is not None and existing is not worksheet:
             raise ValueError(f"Worksheet already exists: {name!r}")
         old_name = worksheet.label
-        self._sheets_by_name.pop(old_name)
+        self._sheets_by_name.pop(old_name.casefold())
         worksheet._label = name
-        self._sheets_by_name[name] = worksheet
+        self._sheets_by_name[normalized_name] = worksheet
 
     def sheet(self, name: Union[str, int]) -> Worksheet:
         """功能：按名称或索引取得已有工作表。
 
         使用方法：``workbook.sheet("成绩")`` 按名称查询；``workbook.sheet(0)``
-        按创建顺序取得第一张工作表。整数索引采用 Python 规则，从 0 开始并支持负数。
+        按创建顺序取得第一张工作表。整数索引从 0 开始且不接受负数；字符串标签
+        查询不区分大小写。
         参数：``name`` 可以是工作表名称字符串，也可以是整数索引；布尔值不作为索引。
         返回：匹配的 :class:`Worksheet` 对象。
         异常：字符串名称不存在时抛出 ``KeyError``；索引越界时抛出 ``IndexError``；
         参数不是字符串或整数时抛出 ``TypeError``。
         """
         if isinstance(name, str):
-            return self._sheets_by_name[name]
+            try:
+                return self._sheets_by_name[name.casefold()]
+            except KeyError:
+                raise KeyError(name) from None
         if isinstance(name, int) and not isinstance(name, bool):
+            if name < 0:
+                raise IndexError("工作表索引不能为负数")
             return self._sheets[name]
         raise TypeError("工作表标识必须是名称字符串或整数索引")
 
@@ -128,7 +133,7 @@ class Workbook:
         """
         worksheet = self.sheet(name_or_index)
         self._sheets.remove(worksheet)
-        self._sheets_by_name.pop(worksheet.label)
+        self._sheets_by_name.pop(worksheet.label.casefold())
         return self
 
     def move_sheet(self, name_or_index: Union[str, int], index: int) -> "Workbook":
@@ -163,18 +168,27 @@ class Workbook:
         的相应异常。
         """
         source = self.sheet(name_or_index)
+        copied_state = {
+            "values": deepcopy(source._values._values),
+            "formulas": dict(source._formulas),
+            "styles": dict(source._styles),
+            "merged_ranges": list(source._merged_ranges),
+            "rows": deepcopy(source._rows),
+            "columns": deepcopy(source._columns),
+            "page": deepcopy(source._page),
+        }
         target = self.add_sheet(new_name)
         target._label_color = source._label_color
-        target._values._values = dict(source._values._values)
-        target._formulas = dict(source._formulas)
-        target._styles = dict(source._styles)
-        target._merged_ranges = list(source._merged_ranges)
-        target._rows = deepcopy(source._rows)
-        target._columns = deepcopy(source._columns)
+        target._values._values = copied_state["values"]
+        target._formulas = copied_state["formulas"]
+        target._styles = copied_state["styles"]
+        target._merged_ranges = copied_state["merged_ranges"]
+        target._rows = copied_state["rows"]
+        target._columns = copied_state["columns"]
         target._freeze = source._freeze
         target._filter_range = source._filter_range
         target._show_gridlines = source._show_gridlines
-        target._page = deepcopy(source._page)
+        target._page = copied_state["page"]
         target._max_row = source._max_row
         target._max_column = source._max_column
         return target
@@ -222,13 +236,22 @@ class Workbook:
 
         使用方法：``workbook.save("成绩.xlsx")``，也可传入 ``pathlib.Path``。
         参数：``filename`` 为字符串或实现 ``os.PathLike`` 的目标文件路径；
-        ``.xls`` 使用 Excel 97–2003 格式，其他扩展名使用 XLSX 写出行为。
+        ``.xls`` 使用 Excel 97–2003 格式，``.xlsx`` 使用 Open XML 格式；扩展名
+        不区分大小写，其他扩展名不会被写出。
         返回：当前 :class:`Workbook`，用于链式调用。
-        异常：路径不可写时透传文件系统异常。
+        异常：扩展名不是 ``.xlsx`` 或 ``.xls`` 时抛出 ``InvalidFileError``；路径
+        不可写时透传文件系统异常。扩展名验证失败不会延迟创建 ``Sheet1``。
         """
+        if not isinstance(filename, (str, os.PathLike)):
+            raise TypeError("filename 必须是字符串或 PathLike 对象")
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {".xlsx", ".xls"}:
+            raise InvalidFileError(
+                f"不支持的工作簿保存格式：{suffix or '无扩展名'}"
+            )
         if not self._sheets:
             self.active
-        if os.fspath(filename).lower().endswith(".xls"):
+        if suffix == ".xls":
             from ..writer.xls import XlsWriter
 
             XlsWriter(self).write(filename)
