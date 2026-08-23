@@ -14,7 +14,7 @@ from .core import (
 )
 from .style import Alignment, Border, Fill, Font, Side, Style
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = [
     "__version__",

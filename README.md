@@ -1,14 +1,14 @@
-# ExcelKit 0.2.1
+# ExcelKit 0.2.2
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.2.1 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.2.2 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.2.1-py3-none-any.whl
+pip install excelkit-0.2.2-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -38,6 +38,8 @@ worksheet.cell(7, 2)       # C8
 
 worksheet["C8"].row       # 7
 worksheet["C8"].column    # 2
+worksheet["C8"].index     # (7, 2)，顺序为先行后列
+worksheet["C8"].address   # "C8"
 ```
 
 A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW` 和
@@ -96,7 +98,8 @@ assert worksheet.label_color == "FF4472C4"
 
 ### Cell
 
-- `row`、`column`：0-based 行列索引。
+- `row`、`column`：分别返回 0-based 行索引和列索引。
+- `index`：以只读 `(row, column)` 元组一次返回 0-based 行列索引。
 - `address`：对应的规范化 A1 地址。
 - `value`：普通值；写入普通值会清除同位置的公式。
 - `formula`：公式；可包含或省略 `=`，读取时始终带 `=`；写入公式会清除普通值。
@@ -347,7 +350,7 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.2.1 能力边界
+## 0.2.2 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存、区域批量写入、基础样式、模板

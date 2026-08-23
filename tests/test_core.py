@@ -112,7 +112,11 @@ class WorksheetTests(unittest.TestCase):
         from_address = self.worksheet.cell("C8")
         from_indexes = self.worksheet.cell(7, 2)
         self.assertEqual((from_address.row, from_address.column), (7, 2))
+        self.assertEqual(from_address.index, (7, 2))
+        self.assertEqual(self.worksheet["D3"].index, (2, 3))
         self.assertEqual(from_indexes.address, "C8")
+        with self.assertRaises(AttributeError):
+            from_address.index = (0, 0)
         self.assertFalse(hasattr(self.worksheet, "cell_at"))
         with self.assertRaises(TypeError):
             self.worksheet.cell("C8", 2)

@@ -22,6 +22,8 @@ def main() -> None:
     assert worksheet["A3"].formula == "=SUM(A1:A2)"
     assert worksheet["A3"].value is None
     assert (worksheet["A3"].row, worksheet["A3"].column) == (2, 0)
+    assert worksheet["A3"].index == (2, 0)
+    assert worksheet["A3"].address == "A3"
 
     output = Path("02_cell_formula.xlsx")
     workbook.save(output)

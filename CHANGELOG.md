@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.2.2 - 2026-08-23
+
+- `Cell` 增加只读 `index` 属性，以先行后列的 `(row, column)` 元组返回 0-based
+  组合索引；现有 `row`、`column` 和 `address` 功能保持不变。
+- 更新完整中文 API 手册、README、单元格示例和自动化回归测试。
+
 ## 0.2.1 - 2026-08-23
 
 - 将 `Workbook.render()` 默认参数改为 `strict=False`；缺失的整格标签清空，混合

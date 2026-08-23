@@ -142,6 +142,16 @@ class Cell:
         return self._column
 
     @property
+    def index(self) -> tuple[int, int]:
+        """功能：取得单元格的 0-based 行列组合索引。
+
+        使用方法：``worksheet["D3"].index`` 返回 ``(2, 3)``。
+        参数：无；本属性只读，元组元素顺序固定为先行后列。
+        返回：``(row, column)`` 形式的二元整数元组。
+        """
+        return self._row, self._column
+
+    @property
     def address(self) -> str:
         """功能：取得单元格对应的规范化 A1 地址。
 

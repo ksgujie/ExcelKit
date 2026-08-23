@@ -1,6 +1,6 @@
-# ExcelKit 0.2.1 完整中文使用与 API 手册
+# ExcelKit 0.2.2 完整中文使用与 API 手册
 
-版本：0.2.1
+版本：0.2.2
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,7 +8,7 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.2.1-py3-none-any.whl
+pip install excelkit-0.2.2-py3-none-any.whl
 ```
 
 稳定核心对象从顶层导入：
@@ -66,7 +66,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.2.1"
+assert excelkit.__version__ == "0.2.2"
 ```
 
 ## 4. Workbook 工作簿
@@ -266,7 +266,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.2.1 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.2.2 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, by_sheet=None, strict=False)`
 
@@ -915,6 +915,34 @@ assert worksheet["C8"].row == 7
 assert worksheet["C8"].column == 2
 ```
 
+### `Cell.index`
+
+功能：一次返回单元格的 0-based 行列组合索引。该属性由单元格现有行列位置动态
+组成，不创建或维护第二套坐标数据。
+
+参数：无，只读属性；结果元素顺序固定为先行、后列。
+
+返回：`tuple[int, int]`，内容为 `(row, column)`。
+
+异常：属性没有设置器，尝试对 `cell.index` 赋值会抛出 `AttributeError`。需要访问
+其他坐标时，应通过 `worksheet.cell(row, column)` 或 A1 地址取得另一个单元格对象。
+
+```python
+cell = worksheet["D3"]
+
+assert cell.index == (2, 3)
+assert cell.row == 2
+assert cell.column == 3
+```
+
+`index` 适合传递、解包或比较完整坐标；只需要一个维度时，直接使用 `row` 或
+`column` 更清楚：
+
+```python
+row, column = worksheet["D3"].index
+assert (row, column) == (2, 3)
+```
+
 ### `Cell.address`
 
 功能：返回规范化 A1 地址。
@@ -1444,7 +1472,7 @@ page.footer = HeaderFooter(
 写入 XLSX/XLS，由打开文件的 Excel、WPS 等应用在打印或预览时解释；显示细节可能
 随应用而异。
 
-| 控制符 | 功能 | 示例 | ExcelKit 0.2.1 |
+| 控制符 | 功能 | 示例 | ExcelKit 0.2.2 |
 |---|---|---|---|
 | `&L` | 后续内容进入左侧区域 | `&L公司` | 自动生成；通常不要手写 |
 | `&C` | 后续内容进入中间区域 | `&C月报` | 自动生成；通常不要手写 |
@@ -1472,7 +1500,7 @@ page.footer = HeaderFooter(
 | `&"+"` | 使用当前主题的标题字体 | `&"+"标题` | 支持，由表格应用解释 |
 | `&"-"` | 使用当前主题的正文字体 | `&"-"正文` | 支持，由表格应用解释 |
 | `&Kxx.Snnn` | 使用主题颜色；`xx` 为 01～12，`S` 为 `+`/`-`，`nnn` 为 000～100 的明暗百分比 | `&K04.+050文字` | XLSX 支持；由表格应用解释 |
-| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.1 不创建图片关系和媒体文件 |
+| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.2 不创建图片关系和媒体文件 |
 
 格式开关是切换式的。例如 `&B重要&B普通` 只让“重要”变粗。要显示普通 `&`，必须
 写成 `&&`。`HeaderFooter` 的 `left`、`center`、`right` 已经代表三个区域，所以
@@ -1848,14 +1876,14 @@ assert list(store.items()) == [((0, 0), "A1")]
 python -m examples.02_cell_formula
 ```
 
-## 16. 0.2.1 能力边界
+## 16. 0.2.2 能力边界
 
-0.2.1 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
+0.2.2 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
 恢复、页眉页脚图片、普通图片、图表、条件格式、数据验证、Table、筛选条件执行、
 宏对象模型或流式大文件处理。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.1
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.2
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -1879,13 +1907,13 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.2.1 API 速查表
+## 18. 0.2.2 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`sheets`、`active`、`load`、`render`、`save`、`len()` |
 | `Worksheet` | `label`、`label_color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze`、`filter_range`、`show_gridlines`、`page`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
-| `Cell` | `row`、`column`、`address`、`value`、`formula`、`style`、`set_value`、`read`、六种 `as_*` |
+| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | 四个 0-based 边界、`address`、`values`、`set_values`、`merge`、`unmerge` |
 | 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
