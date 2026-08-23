@@ -19,6 +19,7 @@ from .conversion import normalize_value
 from .dimension import ColumnDimension, RowDimension
 from .page import PageSettings
 from .range import Range
+from .table import Table
 
 if TYPE_CHECKING:
     from .workbook import Workbook
@@ -47,6 +48,8 @@ class Worksheet:
         "_color",
         "_values",
         "_formulas",
+        "_formula_values",
+        "_formula_errors",
         "_styles",
         "_merged_ranges",
         "_rows",
@@ -55,6 +58,7 @@ class Worksheet:
         "_filter_range",
         "_show_gridlines",
         "_page",
+        "_tables",
         "_max_row",
         "_max_column",
     )
@@ -71,6 +75,8 @@ class Worksheet:
         self._color: Optional[str] = None
         self._values = ValueStore()
         self._formulas: Dict[Tuple[int, int], str] = {}
+        self._formula_values: Dict[Tuple[int, int], Any] = {}
+        self._formula_errors: Dict[Tuple[int, int], str] = {}
         self._styles: Dict[Tuple[int, int], Style] = {}
         self._merged_ranges: list[Tuple[int, int, int, int]] = []
         self._rows: Dict[int, RowDimension] = {}
@@ -79,6 +85,7 @@ class Worksheet:
         self._filter_range: Optional[str] = None
         self._show_gridlines = True
         self._page = PageSettings()
+        self._tables: Dict[str, Table] = {}
         self._max_row = -1
         self._max_column = -1
 
@@ -277,6 +284,88 @@ class Worksheet:
         返回：当前 :class:`PageSettings`。
         """
         return self._page
+
+    def add_table(
+        self,
+        address: str,
+        *,
+        name: str,
+        style: str = "TableStyleMedium2",
+        has_header: bool = True,
+        show_row_stripes: bool = True,
+        show_column_stripes: bool = False,
+    ) -> Table:
+        """功能：在连续区域上创建工作簿内名称唯一的 Excel 数据表。
+
+        使用方法：``worksheet.add_table("A1:F10", name="SalesTable")``。
+        参数：``address`` 为A1矩形区域；``name`` 为工作簿内唯一表名；``style``
+        为Excel表样式名称；其余布尔值控制表头和行列条纹。
+        返回：新创建的 :class:`Table`。
+        异常：地址、名称、类型或区域重叠无效时抛出 ``ValueError`` 或 ``TypeError``。
+        """
+        area = self.range(address)
+        self._workbook._validate_table_name(name)
+        if self._workbook._table(name) is not None:
+            raise ValueError(f"数据表名称已经存在：{name!r}")
+        for existing in self._tables.values():
+            other = existing.range
+            separated = (
+                area.max_row < other.min_row
+                or area.min_row > other.max_row
+                or area.max_column < other.min_column
+                or area.min_column > other.max_column
+            )
+            if not separated:
+                raise ValueError("同一工作表中的数据表区域不能重叠")
+        table = Table(
+            self,
+            name,
+            area,
+            style=style,
+            has_header=has_header,
+            show_row_stripes=show_row_stripes,
+            show_column_stripes=show_column_stripes,
+        )
+        self._tables[name.casefold()] = table
+        self._touch(area.max_row, area.max_column)
+        return table
+
+    def table(self, name: str) -> Table:
+        """功能：按大小写不敏感名称取得当前工作表的数据表。
+
+        使用方法：``table = worksheet.table("SalesTable")``。
+        参数：``name`` 为数据表名称字符串。
+        返回：匹配的 :class:`Table`。
+        异常：名称不存在时抛出 ``KeyError``；类型错误时抛出 ``TypeError``。
+        """
+        if not isinstance(name, str):
+            raise TypeError("name 必须是字符串")
+        try:
+            return self._tables[name.casefold()]
+        except KeyError:
+            raise KeyError(name) from None
+
+    @property
+    def tables(self) -> tuple[Table, ...]:
+        """功能：取得当前工作表全部数据表的只读顺序快照。
+
+        使用方法：``for table in worksheet.tables: ...``。
+        参数：无，只读属性。
+        返回：按创建或读取顺序排列的 ``tuple[Table, ...]``。
+        """
+        return tuple(self._tables.values())
+
+    def remove_table(self, name: str) -> "Worksheet":
+        """功能：按名称删除当前工作表中的一个数据表定义。
+
+        使用方法：``worksheet.remove_table("SalesTable")``。
+        参数：``name`` 为大小写不敏感名称字符串。
+        返回：当前 :class:`Worksheet`；单元格值和样式不删除。
+        异常：名称不存在或类型无效时透传 :meth:`table` 的异常。
+        """
+        table = self.table(name)
+        self._tables.pop(table.name.casefold())
+        return self
 
     @property
     def max_row(self) -> int:
@@ -483,8 +572,11 @@ class Worksheet:
         if anchor is not None and anchor != (row, column):
             raise ValueError("只能向合并区域的左上角单元格写入值")
         normalized_value = _normalize_value(value)
+        self._workbook._invalidate_formula_caches()
         self._touch(row, column)
         self._formulas.pop((row, column), None)
+        self._formula_values.pop((row, column), None)
+        self._formula_errors.pop((row, column), None)
         self._values.set(row, column, normalized_value)
 
     def _get_formula(self, row: int, column: int) -> Optional[str]:
@@ -500,7 +592,7 @@ class Worksheet:
         return self._formulas.get((row, column))
 
     def _set_formula(
-        self, row: int, column: int, formula: Optional[str]
+        self, row: int, column: int, formula: Optional[str], *, invalidate: bool = True
     ) -> None:
         """功能：校验并设置公式，或使用 ``None`` 清除现有公式。
 
@@ -514,7 +606,11 @@ class Worksheet:
         validate_row_index(row)
         validate_column_index(column)
         if formula is None:
+            if invalidate:
+                self._workbook._invalidate_formula_caches()
             self._formulas.pop((row, column), None)
+            self._formula_values.pop((row, column), None)
+            self._formula_errors.pop((row, column), None)
             return
         anchor = self._merged_anchor(row, column)
         if anchor is not None and anchor != (row, column):
@@ -526,9 +622,48 @@ class Worksheet:
             expression = expression[1:].strip()
         if not expression:
             raise TypeError("公式必须包含表达式")
+        if invalidate:
+            self._workbook._invalidate_formula_caches()
         self._touch(row, column)
         self._values.set(row, column, None)
         self._formulas[(row, column)] = f"={expression}"
+        self._formula_values.pop((row, column), None)
+        self._formula_errors.pop((row, column), None)
+
+    def _get_cached_value(self, row: int, column: int) -> Any:
+        """功能：读取公式最近一次由外部表格软件保存的缓存结果。
+
+        使用方法：由 :attr:`Cell.cached_value` 和 :meth:`Cell.read` 内部调用。
+        参数：``row``、``column`` 为 0-based 整数索引，顺序为先行后列。
+        返回：公式缓存的 Python 值；没有公式或文件没有缓存结果时返回 ``None``。
+        异常：索引无效时抛出 ``InvalidAddressError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        if (row, column) not in self._formulas:
+            return None
+        return self._formula_values.get((row, column))
+
+    def _set_cached_value(self, row: int, column: int, value: Any) -> None:
+        """功能：登记公式单元格从 XLSX 读取到的外部缓存结果。
+
+        使用方法：由 XLSX 读取器在设置公式后内部调用；工作簿计算器直接维护同一
+        缓存容器，业务代码不应调用本方法。
+        参数：``row``、``column`` 为 0-based 整数索引；``value`` 为 XML ``v``
+        元素解析出的 Python 值，``None`` 表示没有缓存结果。
+        返回：``None``；不会把缓存结果伪装成普通 ``Cell.value``。
+        异常：索引无效或目标位置没有公式时抛出 ``InvalidAddressError`` 或
+        ``ValueError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        if (row, column) not in self._formulas:
+            raise ValueError("只有公式单元格可以设置缓存结果")
+        if value is None:
+            self._formula_values.pop((row, column), None)
+        else:
+            self._formula_values[(row, column)] = value
+        self._formula_errors.pop((row, column), None)
 
     def _get_style(self, row: int, column: int) -> Style:
         """功能：读取指定位置的单元格样式。

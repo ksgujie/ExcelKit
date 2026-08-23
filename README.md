@@ -1,14 +1,14 @@
-# ExcelKit 0.3.0
+# ExcelKit 0.4.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.3.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.4.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.3.0-py3-none-any.whl
+pip install excelkit-0.4.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -56,11 +56,15 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `remove_sheet(name_or_index)`：删除工作表并返回当前工作簿。
 - `move_sheet(name_or_index, index)`：移动到指定 0-based 最终位置。
 - `copy_sheet(name_or_index, new_name)`：完整复制内容、布局和打印设置。
+- `add_named_range(name, area)`：创建工作簿级命名区域。
+- `named_range(name)`、`named_ranges`、`remove_named_range(name)`：查询、枚举或删除
+  命名区域。
 - `sheets`：按创建顺序返回工作表 tuple。
 - `active`：返回第一张工作表；空工作簿会创建 `Sheet1`。
 - `Workbook.load(filename)`：读取 XLS、XLSX、XLSM、XLTX、CSV 或 TSV。
 - `render(data=None, *, sheet_data=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
+- `calculate(*, strict=False)`：在 Python 中计算当前支持的公式并更新缓存结果。
 - `save(filename)`：只按 `.xlsx` 或 `.xls` 扩展名保存并返回当前工作簿；其他
   扩展名抛出 `InvalidFileError`。
 
@@ -82,6 +86,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `auto_filter_range`：设置或清除连续自动筛选区域。
 - `show_gridlines`：控制屏幕网格线。
 - `page`：页面布局与打印设置唯一入口。
+- `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表。
+- `table(name)`、`tables`、`remove_table(name)`：查询、枚举或删除本表数据表定义。
 
 `cell_at` 已彻底删除。数字坐标和 A1 地址统一由 `cell()` 处理。
 
@@ -105,12 +111,19 @@ assert worksheet.color == "FF4472C4"
 - `value`：普通值；写入普通值会清除同位置的公式。
 - `formula`：公式；可包含或省略 `=`，读取时始终带 `=`；赋值 `None` 清除公式。
 - `style`：完整不可变样式，支持字体、填充、边框、对齐和数字格式。
+- `cached_value`：公式最近一次由 Excel/WPS 保存的缓存结果，只读；普通单元格和
+  尚未计算的公式返回 `None`；也可由 `Workbook.calculate()` 更新。
+- `formula_status`：返回 `empty`、`pending`、`calculated` 或 `error`。
+- `calculation_error`：返回最近一次 Python 公式计算错误说明。
+- `copy_style(source)`：从另一个 Cell 复制完整样式，不复制值和公式。
 - `set_value(value)`：写入值并返回当前 Cell，用于链式类型转换。
 - `as_string()`、`as_int()`、`as_float()`、`as_bool()`、`as_date()`、
   `as_datetime()`：转换、写回并直接返回目标类型。
 - `read()`：取得只读值快照，可读取 `.value` 或使用同一组 `as_*()` 而不写回。
 
-ExcelKit 只保存公式表达式，不在 Python 中计算公式。
+`cell.value` 始终只表示普通值，公式结果不会伪装成普通值；读取公式结果使用
+`cell.cached_value` 或 `cell.read()`。修改任意输入值或公式会使工作簿内全部派生
+缓存失效，随后可重新调用 `workbook.calculate()` 或交给 Excel/WPS 重新计算。
 
 ### Range
 
@@ -118,6 +131,9 @@ ExcelKit 只保存公式表达式，不在 Python 中计算公式。
 - `values`：以二维 list 读取普通值；公式单元格显示为 `None`。
 - `set_values(values)`：写入等形状二维数据并返回当前区域；普通值会覆盖原公式。
 - `address`：规范化 A1 区域地址。
+- `clear_values()`、`clear_styles()`、`clear()`：分别清除内容、样式或两者。
+- `copy_to(target, *, values=True, formulas=True, styles=True)`：复制到等尺寸区域，
+  并按源目标偏移调整公式中的相对行列引用。
 - `merge()`、`unmerge()`：合并或取消合并当前连续区域。
 
 ```python
@@ -159,6 +175,7 @@ assert cell_address(7, 2) == "C8"
 ```python
 from excelkit.errors import (
     ExcelKitError,
+    FormulaCalculationError,
     InvalidAddressError,
     InvalidWorksheetNameError,
     InvalidFileError,
@@ -169,6 +186,7 @@ from excelkit.errors import (
 - `InvalidAddressError`：A1 地址或 0-based 行列索引无效。
 - `InvalidWorksheetNameError`：工作表名称无效。
 - `InvalidFileError`：读取的文件格式不支持或结构损坏。
+- `FormulaCalculationError`：Python 端公式解析、依赖或计算失败。
 
 ## 日期与日期时间字面量
 
@@ -232,6 +250,56 @@ worksheet["A1"].style = Style(
 
 样式对象不可变，可安全复用于多个单元格。XLSX 支持样式完整往返；XLS 会映射基础
 样式，但受旧格式调色板和对齐表示能力限制。
+
+只复制样式时以目标单元格调用：
+
+```python
+worksheet["B1"].copy_style(worksheet["A1"])
+```
+
+## 公式计算与缓存结果
+
+```python
+worksheet["A1"] = 10
+worksheet["A2"] = 20
+worksheet["A3"].formula = "=SUM(A1:A2)"
+
+workbook.calculate()
+assert worksheet["A3"].cached_value == 30
+assert worksheet["A3"].formula_status == "calculated"
+assert worksheet["A3"].read().as_int() == 30
+assert worksheet["A3"].value is None
+```
+
+当前计算器支持 `+ - * / // % ^`、比较、括号、单格与区域引用、跨表引用，以及
+`SUM`、`AVERAGE`、`MIN`、`MAX`、`COUNT`、`COUNTA`、`IF`、`AND`、`OR`、
+`NOT`、`ABS`、`INT`、`ROUND`、`CONCAT`、`LEN`、`LEFT`、`RIGHT`、`MID`。
+`strict=False` 会把逐格错误记录到 `calculation_error` 并继续；`strict=True` 在
+首个错误处抛出 `FormulaCalculationError`。这不是完整 Excel 公式引擎，未支持的
+函数仍应交给 Excel/WPS 计算。
+
+## 命名区域和数据表
+
+```python
+amounts = workbook.add_named_range(
+    "SalesAmount", worksheet.range("C2:C100")
+)
+assert workbook.named_range("salesamount") is amounts
+
+table = worksheet.add_table(
+    "A1:C100",
+    name="SalesTable",
+    style="TableStyleMedium9",
+    has_header=True,
+    show_row_stripes=True,
+    show_column_stripes=False,
+)
+```
+
+命名区域属于 Workbook，名称大小写不敏感；工作表重命名后引用自动跟随，删除工作表
+时相关命名区域也会删除。Table 属于 Worksheet，但名称在整个工作簿内唯一，且同一
+工作表中的 Table 区域不能重叠。两者都支持 XLSX 保存和读取；旧版 `.xls` 只保留
+区域内的单元格数据和可表达的基础样式，不保留命名区域或 Table 定义。
 
 ## 读取文件
 
@@ -357,12 +425,13 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.3.0 能力边界
+## 0.4.0 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
-打印设置、普通值、类型转换、日期时间、公式保存、区域批量写入、基础样式、模板
-安全数值表达式、XLS/XLSX 读写及 CSV/TSV 读取。不包含公式计算、条件格式、数据
-验证、超链接对象、批注、图表、图片或流式读写。
+打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域
+批量操作、基础样式、命名区域、基础 Table、模板安全数值表达式、XLS/XLSX 读写及
+CSV/TSV 读取。Python 公式计算器不是 Excel 全函数兼容引擎；本版本也不包含条件
+格式、数据验证、超链接对象、批注、图表、图片、结构化 Table 公式或流式读写。
 
 ## 开发验证
 

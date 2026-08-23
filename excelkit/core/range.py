@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, List
 
 from ..address import cell_address
@@ -46,6 +47,16 @@ class Range:
         返回：0-based 整数行索引。
         """
         return self._min_row
+
+    @property
+    def worksheet(self) -> "Worksheet":
+        """功能：取得当前区域所属工作表。
+
+        使用方法：``worksheet = area.worksheet``。
+        参数：无，只读属性。
+        返回：创建当前区域的 :class:`Worksheet`。
+        """
+        return self._worksheet
 
     @property
     def min_column(self) -> int:
@@ -157,6 +168,159 @@ class Range:
                     value,
                 )
         return self
+
+    def clear_values(self) -> "Range":
+        """功能：清除区域内普通值、公式、缓存结果和计算错误并保留样式。
+
+        使用方法：``worksheet.range("A1:C10").clear_values()``。
+        参数：无。
+        返回：当前 :class:`Range`，支持链式调用。
+        """
+        self._worksheet._workbook._invalidate_formula_caches()
+        for row in range(self._min_row, self._max_row + 1):
+            for column in range(self._min_column, self._max_column + 1):
+                coordinate = (row, column)
+                self._worksheet._values.set(row, column, None)
+                self._worksheet._formulas.pop(coordinate, None)
+                self._worksheet._formula_values.pop(coordinate, None)
+                self._worksheet._formula_errors.pop(coordinate, None)
+        return self
+
+    def clear_styles(self) -> "Range":
+        """功能：把区域内全部单元格恢复为默认样式并保留值和公式。
+
+        使用方法：``worksheet.range("A1:C10").clear_styles()``。
+        参数：无。
+        返回：当前 :class:`Range`，支持链式调用。
+        """
+        for row in range(self._min_row, self._max_row + 1):
+            for column in range(self._min_column, self._max_column + 1):
+                self._worksheet._styles.pop((row, column), None)
+        return self
+
+    def clear(self) -> "Range":
+        """功能：同时清除区域内值、公式、缓存结果、计算错误和样式。
+
+        使用方法：``worksheet.range("A1:C10").clear()``。
+        参数：无；合并关系和行列尺寸不受影响。
+        返回：当前 :class:`Range`，支持链式调用。
+        """
+        self.clear_values()
+        self.clear_styles()
+        return self
+
+    def copy_to(
+        self,
+        target: "Range",
+        *,
+        values: bool = True,
+        formulas: bool = True,
+        styles: bool = True,
+    ) -> "Range":
+        """功能：把当前区域的值、公式和样式复制到同尺寸目标区域。
+
+        使用方法：``source.copy_to(target)``；仅复制样式可传入
+        ``values=False, formulas=False, styles=True``。
+        参数：``target`` 为同尺寸 :class:`Range`；三个布尔开关分别控制普通值、
+        公式和样式。公式按源目标行列偏移调整相对 A1 引用；当 ``formulas=False``
+        且 ``values=True`` 时，公式单元格复制现有缓存结果作为普通值。
+        返回：目标 :class:`Range`，支持继续操作目标区域。
+        异常：参数类型、区域尺寸或开关类型无效，以及目标合并区域禁止写入时抛出
+        ``TypeError`` 或 ``ValueError``；失败时目标区域保持不变。
+        """
+        if not isinstance(target, Range):
+            raise TypeError("target 必须是 Range")
+        for name, enabled in (
+            ("values", values), ("formulas", formulas), ("styles", styles)
+        ):
+            if not isinstance(enabled, bool):
+                raise TypeError(f"{name} 必须是布尔值")
+        source_shape = (
+            self._max_row - self._min_row + 1,
+            self._max_column - self._min_column + 1,
+        )
+        target_shape = (
+            target._max_row - target._min_row + 1,
+            target._max_column - target._min_column + 1,
+        )
+        if source_shape != target_shape:
+            raise ValueError("源区域和目标区域尺寸必须完全一致")
+
+        snapshots = []
+        for row_offset in range(source_shape[0]):
+            for column_offset in range(source_shape[1]):
+                source_coordinate = (
+                    self._min_row + row_offset,
+                    self._min_column + column_offset,
+                )
+                target_coordinate = (
+                    target._min_row + row_offset,
+                    target._min_column + column_offset,
+                )
+                if values or formulas:
+                    anchor = target._worksheet._merged_anchor(*target_coordinate)
+                    if anchor is not None and anchor != target_coordinate:
+                        raise ValueError("不能复制到合并区域的非左上角单元格")
+                formula = self._worksheet._formulas.get(source_coordinate)
+                ordinary = self._worksheet._values.get(*source_coordinate)
+                cached = self._worksheet._formula_values.get(source_coordinate)
+                style = self._worksheet._styles.get(source_coordinate)
+                snapshots.append(
+                    (
+                        row_offset,
+                        column_offset,
+                        deepcopy(ordinary),
+                        formula,
+                        deepcopy(cached),
+                        style,
+                    )
+                )
+
+        row_delta = target._min_row - self._min_row
+        column_delta = target._min_column - self._min_column
+        if formulas:
+            from ..template import _translate_formula
+
+            snapshots = [
+                (
+                    row_offset,
+                    column_offset,
+                    ordinary,
+                    _translate_formula(formula, row_delta, column_delta)
+                    if formula is not None else None,
+                    cached,
+                    style,
+                )
+                for row_offset, column_offset, ordinary, formula, cached, style
+                in snapshots
+            ]
+        if values or formulas:
+            target._worksheet._workbook._invalidate_formula_caches()
+
+        for row_offset, column_offset, ordinary, formula, cached, style in snapshots:
+            row = target._min_row + row_offset
+            column = target._min_column + column_offset
+            coordinate = (row, column)
+            if formulas and formula is not None:
+                target._worksheet._values.set(row, column, None)
+                target._worksheet._formulas[coordinate] = formula
+                target._worksheet._formula_values.pop(coordinate, None)
+                target._worksheet._formula_errors.pop(coordinate, None)
+                target._worksheet._touch(row, column)
+            elif values:
+                copied_value = cached if formula is not None else ordinary
+                target._worksheet._values.set(row, column, copied_value)
+                target._worksheet._formulas.pop(coordinate, None)
+                target._worksheet._formula_values.pop(coordinate, None)
+                target._worksheet._formula_errors.pop(coordinate, None)
+                target._worksheet._touch(row, column)
+            if styles:
+                if style is None:
+                    target._worksheet._styles.pop(coordinate, None)
+                else:
+                    target._worksheet._styles[coordinate] = style
+                    target._worksheet._touch(row, column)
+        return target
 
     def merge(self) -> "Range":
         """功能：合并当前矩形区域并保留左上角单元格内容。

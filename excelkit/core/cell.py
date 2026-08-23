@@ -21,7 +21,11 @@ if TYPE_CHECKING:
 
 
 class CellValue:
-    """表示一次 ``Cell.read()`` 获得的不可变普通值快照。"""
+    """表示一次 ``Cell.read()`` 获得的不可变值快照。
+
+    普通单元格快照保存 ``Cell.value``；公式单元格快照优先保存 Excel/WPS
+    最近一次写入文件的缓存计算结果。快照转换始终只影响 Python 返回值，不会写回工作簿。
+    """
 
     __slots__ = ("_value",)
 
@@ -29,7 +33,7 @@ class CellValue:
         """功能：创建不会写回工作表的单元格值快照。
 
         使用方法：由 ``cell.read()`` 创建，通常不直接实例化。
-        参数：``value`` 为读取瞬间的单元格普通值。
+        参数：``value`` 为读取瞬间的普通值或公式缓存结果。
         返回：无。
         """
         self._value = value
@@ -40,7 +44,7 @@ class CellValue:
 
         使用方法：``raw_value = cell.read().value``。
         参数：无；本属性只读，不会把任何内容写回原单元格。
-        返回：快照保存的原始 Python 值；空单元格或公式单元格返回 ``None``。
+        返回：快照保存的原始 Python 值；空单元格或没有缓存结果的公式单元格返回 ``None``。
         """
         return self._value
 
@@ -181,6 +185,45 @@ class Cell:
         """
         return self._worksheet._values.get(self._row, self._column)
 
+    @property
+    def cached_value(self) -> Any:
+        """功能：读取公式最近一次由表格软件或工作簿计算器生成的缓存结果。
+
+        使用方法：``result = worksheet["C3"].cached_value``。
+        参数：无；本属性只读，不会触发公式计算。
+        返回：公式缓存的 Python 值；普通单元格、未计算公式或已失效缓存返回
+        ``None``。缓存值可能因源数据变化而过期，不能替代表格软件重新计算。
+        """
+        return self._worksheet._get_cached_value(self._row, self._column)
+
+    @property
+    def formula_status(self) -> str:
+        """功能：读取公式单元格当前的计算状态。
+
+        使用方法：``status = worksheet["C3"].formula_status``。
+        参数：无，只读属性。
+        返回：``empty``、``pending``、``calculated`` 或 ``error``；分别表示没有
+        公式、等待计算、已有缓存结果或最近一次计算失败。
+        """
+        coordinate = (self._row, self._column)
+        if self.formula is None:
+            return "empty"
+        if coordinate in self._worksheet._formula_errors:
+            return "error"
+        if coordinate in self._worksheet._formula_values:
+            return "calculated"
+        return "pending"
+
+    @property
+    def calculation_error(self) -> Optional[str]:
+        """功能：读取公式最近一次 Python 计算失败的错误说明。
+
+        使用方法：``message = worksheet["C3"].calculation_error``。
+        参数：无，只读属性。
+        返回：错误说明字符串；没有公式或最近计算未失败时返回 ``None``。
+        """
+        return self._worksheet._formula_errors.get((self._row, self._column))
+
     @value.setter
     def value(self, value: Any) -> None:
         """功能：写入或清除普通值，并清除同一位置的公式。
@@ -205,14 +248,27 @@ class Cell:
         return self
 
     def read(self) -> CellValue:
-        """功能：读取当前普通值的不可变快照，用于不写回的链式类型转换。
+        """功能：读取当前值的不可变快照，用于不写回的链式类型转换。
 
         使用方法：``number = cell.read().as_int()``；与直接 ``cell.as_int()``
-        不同，转换结果不会修改工作表，也不会影响之后的文件保存内容。
+        不同，转换结果不会修改工作表，也不会影响之后的文件保存内容。公式单元格
+        优先读取 Excel/WPS 保存的 ``cached_value``，没有缓存时读取到 ``None``。
         参数：无。
-        返回：包含读取瞬间原始值的 :class:`CellValue`。
+        返回：包含读取瞬间普通值或公式缓存结果的 :class:`CellValue`。
         """
-        return CellValue(self.value)
+        value = self.cached_value if self.formula is not None else self.value
+        return CellValue(value)
+
+    def _ensure_no_formula(self) -> None:
+        """功能：阻止写回型类型转换覆盖公式单元格。
+
+        使用方法：由 ``Cell.as_*`` 方法在转换前内部调用。
+        参数：无；检查当前单元格是否存在公式。
+        返回：``None``；没有公式时允许继续转换。
+        异常：公式单元格抛出 ``ValueError``，并保持公式与缓存结果不变。
+        """
+        if self.formula is not None:
+            raise ValueError("公式单元格不能使用写回型 as_*()；请使用 cell.read().as_*()")
 
     def as_string(self) -> str:
         """功能：转换当前值为字符串、写回单元格并返回转换结果。
@@ -220,8 +276,9 @@ class Cell:
         使用方法：``text = cell.set_value(123).as_string()``。
         参数：无；``None`` 转为空字符串，其余值使用 ``str()``。
         返回：写回后的 ``str``。
-        异常：转换失败时透传异常并保持原值不变。
+        异常：公式单元格抛出 ``ValueError``；其他转换失败时透传异常并保持原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_string(self.value)
         self.value = converted
         return converted
@@ -232,8 +289,10 @@ class Cell:
         使用方法：``number = cell.set_value("123").as_int()``。
         参数：无；接受整数、整数字符串和无小数部分的有限浮点数。
         返回：写回后的 ``int``。
-        异常：无法无损转换时抛出 ``TypeError`` 或 ``ValueError``，原值不变。
+        异常：公式单元格抛出 ``ValueError``；无法无损转换时抛出 ``TypeError`` 或
+        ``ValueError``，原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_int(self.value)
         self.value = converted
         return converted
@@ -244,8 +303,10 @@ class Cell:
         使用方法：``number = cell.set_value("12.5").as_float()``。
         参数：无；接受字符串、整数或浮点数，不接受布尔值。
         返回：写回后的有限 ``float``。
-        异常：类型、格式无效或结果非有限时抛出异常，原值不变。
+        异常：公式单元格抛出 ``ValueError``；类型、格式无效或结果非有限时抛出
+        异常，原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_float(self.value)
         self.value = converted
         return converted
@@ -256,8 +317,9 @@ class Cell:
         使用方法：``flag = cell.set_value("是").as_bool()``。
         参数：无；仅接受统一真假值白名单中的文本、布尔值或 0/1。
         返回：写回后的 ``bool``。
-        异常：类型或取值无效时抛出异常，原值不变。
+        异常：公式单元格抛出 ``ValueError``；类型或取值无效时抛出异常，原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_bool(self.value)
         self.value = converted
         return converted
@@ -268,8 +330,10 @@ class Cell:
         使用方法：``day = cell.set_value("2026/8/1").as_date()``。
         参数：无；接受支持格式的字符串、``date`` 或 ``datetime``。
         返回：写回后的 :class:`date`；``datetime`` 会舍弃时间部分。
-        异常：类型、格式或日期取值无效时抛出异常，原值不变。
+        异常：公式单元格抛出 ``ValueError``；类型、格式或日期取值无效时抛出异常，
+        原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_date(self.value)
         self.value = converted
         return converted
@@ -280,8 +344,10 @@ class Cell:
         使用方法：``moment = cell.set_value("2026-8-1 12:33").as_datetime()``。
         参数：无；接受支持格式的字符串、``date`` 或 ``datetime``。
         返回：写回后的 :class:`datetime`；纯日期补为午夜时间。
-        异常：类型、格式或日期时间无效时抛出异常，原值不变。
+        异常：公式单元格抛出 ``ValueError``；类型、格式或日期时间无效时抛出异常，
+        原值不变。
         """
+        self._ensure_no_formula()
         converted = _convert_datetime(self.value)
         self.value = converted
         return converted
@@ -329,14 +395,30 @@ class Cell:
         """
         self._worksheet._set_style(self._row, self._column, style)
 
+    def copy_style(self, source: "Cell") -> "Cell":
+        """功能：从另一个单元格复制完整样式到当前目标单元格。
+
+        使用方法：``target.copy_style(source)``，例如
+        ``worksheet["B1"].copy_style(worksheet["A1"])``。
+        参数：``source`` 必须是 :class:`Cell`；可以来自其他工作表或工作簿。
+        返回：当前目标 :class:`Cell`，支持继续设置 ``value`` 等属性。
+        异常：参数不是 ``Cell`` 时抛出 ``TypeError``。只复制样式，不复制值、公式
+        或公式缓存结果。
+        """
+        if not isinstance(source, Cell):
+            raise TypeError("source 必须是 Cell")
+        self.style = source.style
+        return self
+
     def __repr__(self) -> str:
         """功能：生成用于调试的单元格文本表示。
 
         使用方法：``repr(cell)``。
         参数：无。
-        返回：包含工作表名、A1 地址、普通值和公式的字符串。
+        返回：包含工作表名、A1 地址、普通值、缓存结果和公式的字符串。
         """
         return (
             f"<Cell {self._worksheet.name}!{self.address} "
-            f"value={self.value!r} formula={self.formula!r}>"
+            f"value={self.value!r} cached_value={self.cached_value!r} "
+            f"formula={self.formula!r}>"
         )

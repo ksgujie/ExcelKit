@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
@@ -10,14 +11,18 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 from ..errors import InvalidFileError, InvalidWorksheetNameError
 from .worksheet import Worksheet
+from .named_range import NamedRange
+from .range import Range
 
 _FORBIDDEN_SHEET_NAME_CHARS = frozenset(":\\/?*[]")
+_NAMED_RANGE_PATTERN = re.compile(r"^(?:[^\W\d]|_)[\w.]*$", re.UNICODE)
+_TABLE_NAME_PATTERN = re.compile(r"^(?:[^\W\d]|_)[\w.]*$", re.UNICODE)
 
 
 class Workbook:
-    """表示一个可写出为 XLSX 文件的内存工作簿。"""
+    """表示可读取、编辑并写出 XLSX 或 XLS 文件的内存工作簿。"""
 
-    __slots__ = ("_sheets", "_sheets_by_name")
+    __slots__ = ("_sheets", "_sheets_by_name", "_named_ranges")
 
     def __init__(self) -> None:
         """功能：创建不含工作表的空工作簿。
@@ -28,6 +33,7 @@ class Workbook:
         """
         self._sheets: list[Worksheet] = []
         self._sheets_by_name: Dict[str, Worksheet] = {}
+        self._named_ranges: Dict[str, NamedRange] = {}
 
     @staticmethod
     def _validate_sheet_name(name: str) -> None:
@@ -76,6 +82,67 @@ class Workbook:
         self._sheets_by_name[normalized_name] = worksheet
         return worksheet
 
+    def _invalidate_formula_caches(self) -> None:
+        """功能：在工作簿输入或公式变化后统一清除全部派生计算状态。
+
+        使用方法：由工作表普通值和公式写入入口内部调用。
+        参数：无。
+        返回：``None``；所有公式保留，仅删除缓存结果和计算错误。
+        """
+        for worksheet in self._sheets:
+            worksheet._formula_values.clear()
+            worksheet._formula_errors.clear()
+
+    @staticmethod
+    def _validate_table_name(name: str) -> None:
+        """功能：验证Excel数据表的工作簿级名称。
+
+        使用方法：由 ``Worksheet.add_table()`` 内部调用。
+        参数：``name`` 必须为1～255字符，以字母或下划线开头且不含空格。
+        返回：验证成功时返回 ``None``。
+        异常：名称无效时抛出 ``ValueError``。
+        """
+        if (
+            not isinstance(name, str)
+            or not 1 <= len(name) <= 255
+            or _TABLE_NAME_PATTERN.fullmatch(name) is None
+        ):
+            raise ValueError("数据表名称必须以字母或下划线开头，且不能包含空格")
+        from ..address import cell_index
+
+        try:
+            cell_index(name)
+        except ValueError:
+            return
+        raise ValueError("数据表名称不能与A1单元格地址相同")
+
+    def _table(self, name: str) -> object | None:
+        """功能：在全部工作表中按大小写不敏感名称查找数据表。
+
+        使用方法：由数据表创建和复制逻辑内部调用。
+        参数：``name`` 为数据表名称。
+        返回：匹配的 ``Table``；不存在时返回 ``None``。
+        """
+        key = name.casefold()
+        for worksheet in self._sheets:
+            if key in worksheet._tables:
+                return worksheet._tables[key]
+        return None
+
+    def _unique_table_name(self, base: str) -> str:
+        """功能：为复制工作表生成不与现有数据表冲突的新名称。
+
+        使用方法：由 ``copy_sheet()`` 内部调用。
+        参数：``base`` 为源数据表名称。
+        返回：``base_Copy`` 或带递增数字后缀的唯一名称。
+        """
+        candidate = f"{base}_Copy"
+        index = 2
+        while self._table(candidate) is not None:
+            candidate = f"{base}_Copy{index}"
+            index += 1
+        return candidate
+
     def _rename_sheet(self, worksheet: Worksheet, name: str) -> None:
         """功能：验证新名称并原子更新工作表名称索引。
 
@@ -99,6 +166,7 @@ class Workbook:
         self._sheets_by_name.pop(old_name.casefold())
         worksheet._name = name
         self._sheets_by_name[normalized_name] = worksheet
+        self._invalidate_formula_caches()
 
     def sheet(self, name: Union[str, int]) -> Worksheet:
         """功能：按名称或索引取得已有工作表。
@@ -134,6 +202,91 @@ class Workbook:
         worksheet = self.sheet(name_or_index)
         self._sheets.remove(worksheet)
         self._sheets_by_name.pop(worksheet.name.casefold())
+        for key, named_range in list(self._named_ranges.items()):
+            if named_range.worksheet is worksheet:
+                self._named_ranges.pop(key)
+        self._invalidate_formula_caches()
+        return self
+
+    @staticmethod
+    def _validate_named_range_name(name: str) -> None:
+        """功能：验证工作簿级命名区域名称是否清晰且符合常用Excel规则。
+
+        使用方法：由 ``add_named_range()`` 内部调用。
+        参数：``name`` 必须以字母或下划线开头，后续可含字母、数字、下划线和点，
+        长度不超过255且不能看起来像A1单元格地址。
+        返回：验证成功时返回 ``None``。
+        异常：名称类型或格式无效时抛出 ``ValueError``。
+        """
+        if not isinstance(name, str) or not 1 <= len(name) <= 255:
+            raise ValueError("命名区域名称必须是1～255个字符的字符串")
+        if _NAMED_RANGE_PATTERN.fullmatch(name) is None:
+            raise ValueError("命名区域名称必须以字母或下划线开头，且不能包含空格")
+        from ..address import cell_index
+
+        try:
+            cell_index(name)
+        except ValueError:
+            return
+        raise ValueError("命名区域名称不能与A1单元格地址相同")
+
+    def add_named_range(self, name: str, area: Range) -> NamedRange:
+        """功能：为当前工作簿中的一块区域登记唯一业务名称。
+
+        使用方法：``workbook.add_named_range("SalesAmount", worksheet.range("E2:E100"))``。
+        参数：``name`` 为大小写不敏感的唯一名称；``area`` 必须是当前工作簿中
+        工作表创建的 :class:`Range`。
+        返回：新创建的 :class:`NamedRange`。
+        异常：名称无效或重复时抛出 ``ValueError``；区域类型或归属错误时抛出
+        ``TypeError`` 或 ``ValueError``。
+        """
+        self._validate_named_range_name(name)
+        if not isinstance(area, Range):
+            raise TypeError("area 必须是 Range")
+        if area.worksheet._workbook is not self:
+            raise ValueError("命名区域必须属于当前工作簿")
+        key = name.casefold()
+        if key in self._named_ranges:
+            raise ValueError(f"命名区域已经存在：{name!r}")
+        named_range = NamedRange(self, name, area)
+        self._named_ranges[key] = named_range
+        return named_range
+
+    def named_range(self, name: str) -> NamedRange:
+        """功能：按大小写不敏感名称取得工作簿级命名区域。
+
+        使用方法：``named = workbook.named_range("SalesAmount")``。
+        参数：``name`` 为名称字符串。
+        返回：匹配的 :class:`NamedRange`。
+        异常：名称不存在时抛出 ``KeyError``；类型错误时抛出 ``TypeError``。
+        """
+        if not isinstance(name, str):
+            raise TypeError("name 必须是字符串")
+        try:
+            return self._named_ranges[name.casefold()]
+        except KeyError:
+            raise KeyError(name) from None
+
+    @property
+    def named_ranges(self) -> Tuple[NamedRange, ...]:
+        """功能：取得全部工作簿级命名区域的只读顺序快照。
+
+        使用方法：``for item in workbook.named_ranges: ...``。
+        参数：无，只读属性。
+        返回：按创建或读取顺序排列的 ``tuple[NamedRange, ...]``。
+        """
+        return tuple(self._named_ranges.values())
+
+    def remove_named_range(self, name: str) -> "Workbook":
+        """功能：按名称删除一个工作簿级命名区域。
+
+        使用方法：``workbook.remove_named_range("SalesAmount")``。
+        参数：``name`` 为大小写不敏感名称字符串。
+        返回：当前 :class:`Workbook`，支持链式调用。
+        异常：名称不存在时抛出 ``KeyError``；类型错误时抛出 ``TypeError``。
+        """
+        named_range = self.named_range(name)
+        self._named_ranges.pop(named_range.name.casefold())
         return self
 
     def move_sheet(self, name_or_index: Union[str, int], index: int) -> "Workbook":
@@ -171,6 +324,8 @@ class Workbook:
         copied_state = {
             "values": deepcopy(source._values._values),
             "formulas": dict(source._formulas),
+            "formula_values": deepcopy(source._formula_values),
+            "formula_errors": dict(source._formula_errors),
             "styles": dict(source._styles),
             "merged_ranges": list(source._merged_ranges),
             "rows": deepcopy(source._rows),
@@ -181,6 +336,8 @@ class Workbook:
         target._color = source._color
         target._values._values = copied_state["values"]
         target._formulas = copied_state["formulas"]
+        target._formula_values = copied_state["formula_values"]
+        target._formula_errors = copied_state["formula_errors"]
         target._styles = copied_state["styles"]
         target._merged_ranges = copied_state["merged_ranges"]
         target._rows = copied_state["rows"]
@@ -191,6 +348,15 @@ class Workbook:
         target._page = copied_state["page"]
         target._max_row = source._max_row
         target._max_column = source._max_column
+        for table in source.tables:
+            target.add_table(
+                table.range.address,
+                name=self._unique_table_name(table.name),
+                style=table.style,
+                has_header=table.has_header,
+                show_row_stripes=table.show_row_stripes,
+                show_column_stripes=table.show_column_stripes,
+            )
         return target
 
     @property
@@ -288,6 +454,24 @@ class Workbook:
         return render_workbook(
             self, data, sheet_data=sheet_data, strict=strict
         )
+
+    def calculate(self, *, strict: bool = False) -> "Workbook":
+        """功能：在 Python 中计算当前版本支持的全部工作簿公式。
+
+        使用方法：``workbook.calculate()``；严格模式使用
+        ``workbook.calculate(strict=True)``。
+        参数：``strict`` 为布尔值；``False`` 时逐格记录错误并继续，``True`` 时
+        首个公式错误抛出 ``FormulaCalculationError``。
+        返回：当前 :class:`Workbook`，支持继续 ``save()``。
+        异常：``strict`` 类型无效时抛出 ``TypeError``；严格模式计算失败时抛出
+        ``FormulaCalculationError``。
+        """
+        if not isinstance(strict, bool):
+            raise TypeError("strict 必须是布尔值")
+        from .calculation import calculate_workbook
+
+        calculate_workbook(self, strict=strict)
+        return self
 
     def __len__(self) -> int:
         """功能：返回工作簿当前包含的工作表数量。

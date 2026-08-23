@@ -3,9 +3,11 @@
 from .cell import Cell, CellValue
 from .dimension import ColumnDimension, RowDimension
 from .page import HeaderFooter, PageMargins, PageSettings
+from .named_range import NamedRange
 from .range import Range
 from .workbook import Workbook
 from .worksheet import Worksheet
+from .table import Table
 
 __all__ = [
     "Workbook",
@@ -18,4 +20,6 @@ __all__ = [
     "PageSettings",
     "PageMargins",
     "HeaderFooter",
+    "NamedRange",
+    "Table",
 ]

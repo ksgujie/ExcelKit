@@ -80,6 +80,38 @@ class XlsxWriterTests(unittest.TestCase):
                 self.assertEqual(cells["F1"].find("m:f", NS).text, "SUM(C1:D1)")
                 self.assertIsNone(cells["F1"].find("m:v", NS))
 
+    def test_formula_cached_value_roundtrip_and_recalculation_flag(self):
+        """功能：验证公式缓存结果写入、读取、只读转换和自动重算标记。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言公式与缓存结果分离保存，重新加载后仍可转换缓存值。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "cached.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet["B3"] = 95
+            sheet["C3"].formula = "=SUM(B3:B3)"
+            sheet._set_cached_value(2, 2, 95)
+            workbook.save(filename)
+
+            with zipfile.ZipFile(filename) as package:
+                workbook_xml = ET.fromstring(package.read("xl/workbook.xml"))
+                calc = workbook_xml.find("m:calcPr", NS)
+                self.assertEqual(calc.attrib["fullCalcOnLoad"], "1")
+                root = ET.fromstring(package.read("xl/worksheets/sheet1.xml"))
+                cell = root.find(".//m:c[@r='C3']", NS)
+                self.assertEqual(cell.find("m:f", NS).text, "SUM(B3:B3)")
+                self.assertEqual(cell.find("m:v", NS).text, "95")
+
+            loaded = Workbook.load(filename)
+            loaded_cell = loaded.active["C3"]
+            self.assertEqual(loaded_cell.formula, "=SUM(B3:B3)")
+            self.assertIsNone(loaded_cell.value)
+            self.assertEqual(loaded_cell.cached_value, 95)
+            self.assertEqual(loaded_cell.read().as_int(), 95)
+
     def test_multiple_sheets_use_zero_based_iteration_internally(self):
         """功能：验证 0-based 遍历仍生成从 sheet1 开始的标准文件名。
 

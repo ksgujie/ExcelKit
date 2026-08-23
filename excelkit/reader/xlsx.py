@@ -31,6 +31,10 @@ _ABSOLUTE_AREA_PATTERN = re.compile(
 )
 _ABSOLUTE_ROW_PATTERN = re.compile(r"\$(\d+):\$(\d+)")
 _ABSOLUTE_COLUMN_PATTERN = re.compile(r"\$([A-Za-z]{1,3}):\$([A-Za-z]{1,3})")
+_NAMED_RANGE_PATTERN = re.compile(
+    r"^(?:'((?:[^']|'')+)'|([^!]+))!"
+    r"\$([A-Za-z]{1,3})\$(\d+):\$([A-Za-z]{1,3})\$(\d+)$"
+)
 _PAPER_SIZE_NAMES = {1: "Letter", 5: "Legal", 8: "A3", 9: "A4", 11: "A5"}
 
 
@@ -380,11 +384,11 @@ def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
 
 
 def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
-    """功能：读取打印区域和重复打印行列的工作簿定义名称。
+    """功能：读取打印设置名称和工作簿级命名区域。
 
     使用方法：全部工作表加载完成后调用。
     参数：``root`` 为workbook.xml根元素；``workbook`` 为目标工作簿。
-    返回：``None``；只处理带本地工作表索引的标准打印名称。
+    返回：``None``；处理标准打印名称以及指向单张工作表矩形区域的全局名称。
     异常：本库支持的定义名称内容损坏时抛出 :class:`InvalidFileError`。
     """
     container = root.find(_tag(_MAIN_NS, "definedNames"))
@@ -392,7 +396,21 @@ def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
         return
     try:
         for item in container.findall(_tag(_MAIN_NS, "definedName")):
-            if item.text is None or item.get("localSheetId") is None:
+            if item.text is None:
+                continue
+            if item.get("localSheetId") is None:
+                name = item.get("name")
+                match = _NAMED_RANGE_PATTERN.fullmatch(item.text)
+                if not name or name.startswith("_xlnm.") or match is None:
+                    continue
+                sheet_name = (match.group(1) or match.group(2)).replace("''", "'")
+                address = (
+                    f"{match.group(3)}{match.group(4)}:"
+                    f"{match.group(5)}{match.group(6)}"
+                )
+                workbook.add_named_range(
+                    name, workbook.sheet(sheet_name).range(address)
+                )
                 continue
             sheet_index = int(item.get("localSheetId", "-1"))
             if not 0 <= sheet_index < len(workbook.sheets):
@@ -418,8 +436,8 @@ def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
                         column_to_index(column_match.group(1)),
                         column_to_index(column_match.group(2)),
                     )
-    except (TypeError, ValueError) as error:
-        raise InvalidFileError("打印区域或重复标题定义无效") from error
+    except (TypeError, ValueError, KeyError) as error:
+        raise InvalidFileError("打印设置或命名区域定义无效") from error
 
 
 def _load_sheet(
@@ -463,7 +481,16 @@ def _load_sheet(
             raise InvalidFileError(f"无效的单元格样式索引：{cell.get('s')!r}") from error
         formula = cell.find(_tag(_MAIN_NS, "f"))
         if formula is not None and formula.text:
-            worksheet._set_formula(row, column, formula.text)
+            worksheet._set_formula(row, column, formula.text, invalidate=False)
+            cached = cell.find(_tag(_MAIN_NS, "v"))
+            if cached is not None and (
+                cached.text is not None or cell.get("t") in {"str", "e"}
+            ):
+                value = (
+                    "" if cached.text is None else
+                    _cell_value(cell, shared_strings, style_index, date_styles, date_1904)
+                )
+                worksheet._set_cached_value(row, column, value)
         else:
             value = _cell_value(cell, shared_strings, style_index, date_styles, date_1904)
             worksheet._touch(row, column)
@@ -471,6 +498,86 @@ def _load_sheet(
         if style != DEFAULT_STYLE:
             worksheet._styles[(row, column)] = style
     _load_sheet_layout(root, worksheet)
+    _load_sheet_tables(package, member, root, worksheet)
+
+
+def _load_sheet_tables(
+    package: zipfile.ZipFile,
+    member: str,
+    root: ET.Element,
+    worksheet: "Worksheet",
+) -> None:
+    """功能：读取工作表关系所引用的全部 Excel 数据表定义。
+
+    使用方法：单张工作表完成单元格和布局读取后由内部调用。
+    参数：``package`` 为XLSX包；``member`` 为工作表包内路径；``root`` 为工作表
+    XML根元素；``worksheet`` 为接收数据表对象的目标工作表。
+    返回：``None``；没有 ``tableParts`` 时不做任何修改。
+    异常：关系缺失、目标越界或数据表定义无效时抛出 :class:`InvalidFileError`。
+    """
+    table_parts = root.find(_tag(_MAIN_NS, "tableParts"))
+    if table_parts is None:
+        return
+    directory, filename = posixpath.split(member)
+    relationships_member = posixpath.join(directory, "_rels", f"{filename}.rels")
+    relationships_root = _read_xml(package, relationships_member)
+    targets: Dict[str, str] = {}
+    for relationship in relationships_root.findall(
+        _tag(_PACKAGE_REL_NS, "Relationship")
+    ):
+        relationship_id = relationship.get("Id")
+        target = relationship.get("Target")
+        relationship_type = relationship.get("Type", "")
+        if (
+            not relationship_id
+            or not target
+            or relationship.get("TargetMode") == "External"
+            or not relationship_type.endswith("/table")
+        ):
+            continue
+        target = target.replace("\\", "/")
+        normalized = (
+            posixpath.normpath(target.lstrip("/"))
+            if target.startswith("/")
+            else posixpath.normpath(posixpath.join(directory, target))
+        )
+        if normalized == ".." or normalized.startswith("../"):
+            raise InvalidFileError(f"非法的数据表关系目标：{target!r}")
+        targets[relationship_id] = normalized
+
+    try:
+        for table_part in table_parts.findall(_tag(_MAIN_NS, "tablePart")):
+            relationship_id = table_part.get(_tag(_REL_NS, "id"))
+            if not relationship_id or relationship_id not in targets:
+                raise InvalidFileError("工作表数据表关系缺失")
+            table_root = _read_xml(package, targets[relationship_id])
+            name = table_root.get("displayName") or table_root.get("name")
+            address = table_root.get("ref")
+            if not name or not address:
+                raise InvalidFileError("数据表名称或区域缺失")
+            style_info = table_root.find(_tag(_MAIN_NS, "tableStyleInfo"))
+            style = (
+                style_info.get("name", "TableStyleMedium2")
+                if style_info is not None else "TableStyleMedium2"
+            )
+            worksheet.add_table(
+                address,
+                name=name,
+                style=style,
+                has_header=table_root.get("headerRowCount", "1") != "0",
+                show_row_stripes=(
+                    style_info is not None
+                    and style_info.get("showRowStripes", "0") in {"1", "true", "True"}
+                ),
+                show_column_stripes=(
+                    style_info is not None
+                    and style_info.get("showColumnStripes", "0") in {"1", "true", "True"}
+                ),
+            )
+    except (TypeError, ValueError, KeyError) as error:
+        if isinstance(error, InvalidFileError):
+            raise
+        raise InvalidFileError("工作表数据表定义无效") from error
 
 
 def _load_xlsx(

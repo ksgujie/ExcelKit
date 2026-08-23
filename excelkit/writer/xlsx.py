@@ -18,6 +18,7 @@ from ..style import DEFAULT_STYLE
 from .styles import StyleRegistry
 
 if TYPE_CHECKING:
+    from ..core.table import Table
     from ..core.workbook import Workbook
     from ..core.worksheet import Worksheet
 
@@ -88,12 +89,13 @@ def _inline_string_cell(address: str, value: str) -> ET.Element:
     return cell
 
 
-def content_types(sheet_count: int) -> bytes:
+def content_types(sheet_count: int, table_count: int = 0) -> bytes:
     """功能：根据工作表数量生成 XLSX 内容类型声明。
 
     使用方法：``content_types(len(workbook.sheets))``；由 :class:`XlsxWriter`
     写入 ``[Content_Types].xml``。
-    参数：``sheet_count`` 为大于等于 1 的整数工作表数量，属于计数而非索引。
+    参数：``sheet_count`` 为大于等于 1 的整数工作表数量；``table_count`` 为非负
+    Excel数据表数量，两者都属于计数而非索引。
     返回：UTF-8 XML 字节串。
     异常：参数不是正整数或是布尔值时抛出 ``ValueError``。
     """
@@ -103,6 +105,12 @@ def content_types(sheet_count: int) -> bytes:
         or sheet_count < 1
     ):
         raise ValueError("工作表数量必须是大于等于 1 的整数")
+    if (
+        isinstance(table_count, bool)
+        or not isinstance(table_count, int)
+        or table_count < 0
+    ):
+        raise ValueError("数据表数量必须是非负整数")
 
     root = ET.Element(_qname(_CONTENT_TYPES_NS, "Types"))
     ET.SubElement(
@@ -149,14 +157,29 @@ def content_types(sheet_count: int) -> bytes:
             ),
         },
     )
+    for table_id in range(1, table_count + 1):
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Override"),
+            {
+                "PartName": f"/xl/tables/table{table_id}.xml",
+                "ContentType": (
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.table+xml"
+                ),
+            },
+        )
     return _xml_bytes(root)
 
 
-def workbook_xml(sheets: Sequence["Worksheet"]) -> bytes:
+def workbook_xml(
+    sheets: Sequence["Worksheet"], named_ranges: Sequence[object] = ()
+) -> bytes:
     """功能：生成包含工作表名称、顺序和关系编号的工作簿 XML。
 
     使用方法：``workbook_xml(workbook.sheets)``。
-    参数：``sheets`` 为按创建顺序排列的工作表序列。
+    参数：``sheets`` 为按创建顺序排列的工作表序列；``named_ranges`` 为工作簿级
+    命名区域序列。
     返回：可写入 ``xl/workbook.xml`` 的 UTF-8 XML 字节串。
     """
     root = ET.Element(_qname(_MAIN_NS, "workbook"))
@@ -203,14 +226,29 @@ def workbook_xml(sheets: Sequence["Worksheet"]) -> bytes:
                     ",".join(prefix + title for title in titles),
                 )
             )
+    for named_range in named_ranges:
+        area = named_range.range
+        sheet_name = named_range.worksheet.name.replace("'", "''")
+        reference = (
+            f"'{sheet_name}'!"
+            f"${index_to_column(area.min_column)}${area.min_row + 1}:"
+            f"${index_to_column(area.max_column)}${area.max_row + 1}"
+        )
+        defined_names.append((named_range.name, None, reference))
     if defined_names:
         container = ET.SubElement(root, _qname(_MAIN_NS, "definedNames"))
         for name, sheet_index, value in defined_names:
+            attributes = {"name": name}
+            if sheet_index is not None:
+                attributes["localSheetId"] = str(sheet_index)
             ET.SubElement(
-                container,
-                _qname(_MAIN_NS, "definedName"),
-                {"name": name, "localSheetId": str(sheet_index)},
+                container, _qname(_MAIN_NS, "definedName"), attributes
             ).text = value
+    ET.SubElement(
+        root,
+        _qname(_MAIN_NS, "calcPr"),
+        {"calcMode": "auto", "fullCalcOnLoad": "1", "forceFullCalc": "1"},
+    )
     return _xml_bytes(root)
 
 
@@ -282,13 +320,15 @@ def cell_xml(address: str, value: Any) -> Optional[ET.Element]:
     return _inline_string_cell(address, str(value))
 
 
-def formula_xml(address: str, formula: str) -> ET.Element:
+def formula_xml(address: str, formula: str, cached_value: Any = None) -> ET.Element:
     """功能：把公式转换为 SpreadsheetML 公式单元格元素。
 
-    使用方法：由 :func:`sheet_xml` 调用 ``formula_xml("C2", "=SUM(A2:B2)")``。
+    使用方法：由 :func:`sheet_xml` 调用 ``formula_xml("C2", "=SUM(A2:B2)", 95)``。
     参数：``address`` 为规范化 A1 地址；``formula`` 为包含表达式的公式字符串，
     可以带或不带前导 ``=``。
-    返回：包含 ``f`` 子元素且不带缓存计算值的 ``c`` 元素。
+    参数：``cached_value`` 为 Excel/WPS 最近一次保存或 ``Workbook.calculate()``
+    生成的计算结果；为 ``None`` 时不写入 ``v`` 元素。
+    返回：包含 ``f`` 子元素以及可选 ``v`` 缓存结果的 ``c`` 元素。
     异常：公式不是非空字符串或没有表达式时抛出 ``TypeError``。
     """
     if not isinstance(formula, str):
@@ -300,17 +340,134 @@ def formula_xml(address: str, formula: str) -> ET.Element:
         raise TypeError("公式必须包含表达式")
     cell = ET.Element(_qname(_MAIN_NS, "c"), {"r": address})
     ET.SubElement(cell, _qname(_MAIN_NS, "f")).text = _escape_text(expression)
+    if cached_value is not None:
+        if isinstance(cached_value, str):
+            cell.set("t", "str")
+            cached_text = cached_value
+        elif isinstance(cached_value, (datetime, date)):
+            cell.set("t", "d")
+            cached_text = cached_value.isoformat()
+        elif isinstance(cached_value, bool):
+            cell.set("t", "b")
+            cached_text = "1" if cached_value else "0"
+        elif isinstance(cached_value, int):
+            cached_text = str(cached_value)
+        elif isinstance(cached_value, float) and math.isfinite(cached_value):
+            cached_text = repr(cached_value)
+        else:
+            cell.set("t", "str")
+            cached_text = str(cached_value)
+        ET.SubElement(cell, _qname(_MAIN_NS, "v")).text = _escape_text(cached_text)
     return cell
 
 
+def _table_column_names(table: "Table") -> list[str]:
+    """功能：从数据表首行生成非空且大小写不敏感唯一的列名称。
+
+    使用方法：由 :func:`table_xml` 写出 ``tableColumns`` 时调用。
+    参数：``table`` 为待写出的数据表。
+    返回：与表格列数一致的名称列表；空值和重复名称自动生成稳定后缀。
+    """
+    area = table.range
+    names: list[str] = []
+    used: set[str] = set()
+    for offset, column in enumerate(
+        range(area.min_column, area.max_column + 1), 1
+    ):
+        value = (
+            table.worksheet._values.get(area.min_row, column)
+            if table.has_header else None
+        )
+        base = str(value) if value not in (None, "") else f"Column{offset}"
+        candidate = base
+        suffix = 2
+        while candidate.casefold() in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate.casefold())
+        names.append(candidate)
+    return names
+
+
+def table_xml(table: "Table", table_id: int) -> bytes:
+    """功能：生成一个标准 SpreadsheetML 数据表定义部件。
+
+    使用方法：XLSX打包器为每个工作簿数据表调用一次。
+    参数：``table`` 为数据表对象；``table_id`` 为从1开始的包内唯一整数。
+    返回：可写入 ``xl/tables/tableN.xml`` 的UTF-8 XML字节串。
+    """
+    area = table.range
+    attributes = {
+        "id": str(table_id),
+        "name": table.name,
+        "displayName": table.name,
+        "ref": area.address,
+        "totalsRowShown": "0",
+    }
+    if not table.has_header:
+        attributes["headerRowCount"] = "0"
+    root = ET.Element(_qname(_MAIN_NS, "table"), attributes)
+    if table.has_header:
+        ET.SubElement(root, _qname(_MAIN_NS, "autoFilter"), {"ref": area.address})
+    names = _table_column_names(table)
+    columns = ET.SubElement(
+        root, _qname(_MAIN_NS, "tableColumns"), {"count": str(len(names))}
+    )
+    for column_id, name in enumerate(names, 1):
+        ET.SubElement(
+            columns,
+            _qname(_MAIN_NS, "tableColumn"),
+            {"id": str(column_id), "name": _escape_text(name)},
+        )
+    ET.SubElement(
+        root,
+        _qname(_MAIN_NS, "tableStyleInfo"),
+        {
+            "name": table.style,
+            "showFirstColumn": "0",
+            "showLastColumn": "0",
+            "showRowStripes": "1" if table.show_row_stripes else "0",
+            "showColumnStripes": "1" if table.show_column_stripes else "0",
+        },
+    )
+    return _xml_bytes(root)
+
+
+def worksheet_rels(table_ids: Sequence[int]) -> bytes:
+    """功能：生成单张工作表到其数据表部件的关系清单。
+
+    使用方法：工作表包含数据表时由XLSX打包器调用。
+    参数：``table_ids`` 为当前工作表数据表对应的全局1-based编号。
+    返回：工作表 ``.rels`` XML字节串。
+    """
+    root = ET.Element(_qname(_PACKAGE_REL_NS, "Relationships"))
+    for relationship_index, table_id in enumerate(table_ids, 1):
+        ET.SubElement(
+            root,
+            _qname(_PACKAGE_REL_NS, "Relationship"),
+            {
+                "Id": f"rId{relationship_index}",
+                "Type": (
+                    "http://schemas.openxmlformats.org/officeDocument/2006/"
+                    "relationships/table"
+                ),
+                "Target": f"../tables/table{table_id}.xml",
+            },
+        )
+    return _xml_bytes(root)
+
+
 def sheet_xml(
-    sheet: "Worksheet", style_registry: Optional[StyleRegistry] = None
+    sheet: "Worksheet",
+    style_registry: Optional[StyleRegistry] = None,
+    table_ids: Sequence[int] = (),
 ) -> bytes:
     """功能：生成单张工作表的完整 SpreadsheetML XML。
 
     使用方法：由 :class:`XlsxWriter` 对工作簿中的每张工作表调用。
     参数：``sheet`` 为待写出的工作表；``style_registry`` 为工作簿共享样式注册器，
-    省略时为当前单表临时创建。普通值、公式和样式按 0-based 行列索引合并排序。
+    省略时为当前单表临时创建；``table_ids`` 为本表数据表对应的全局1-based编号。
+    普通值、公式和样式按0-based行列索引合并排序。
     返回：包含精确数据边界和 ``sheetData`` 的 UTF-8 XML 字节串。
     """
     root = ET.Element(_qname(_MAIN_NS, "worksheet"))
@@ -417,7 +574,9 @@ def sheet_xml(
             style_id = style_registry.style_id(style)
             formula = sheet._formulas.get((row, column))
             if formula is not None:
-                element = formula_xml(address, formula)
+                element = formula_xml(
+                    address, formula, sheet._formula_values.get((row, column))
+                )
             else:
                 element = cell_xml(address, values.get((row, column)))
             if element is None and style_id:
@@ -495,6 +654,18 @@ def sheet_xml(
             ET.SubElement(
                 header_footer, _qname(_MAIN_NS, "oddFooter")
             ).text = footer_text
+    if table_ids:
+        table_parts = ET.SubElement(
+            root,
+            _qname(_MAIN_NS, "tableParts"),
+            {"count": str(len(table_ids))},
+        )
+        for relationship_index, _table_id in enumerate(table_ids, 1):
+            ET.SubElement(
+                table_parts,
+                _qname(_MAIN_NS, "tablePart"),
+                {_qname(_REL_NS, "id"): f"rId{relationship_index}"},
+            )
     return _xml_bytes(root)
 
 
@@ -566,15 +737,42 @@ class XlsxWriter:
             ) as package:
                 sheets = self.workbook.sheets
                 style_registry = StyleRegistry(sheets)
-                package.writestr("[Content_Types].xml", content_types(len(sheets)))
+                table_entries = []
+                sheet_table_ids = {}
+                next_table_id = 1
+                for sheet_index, worksheet in enumerate(sheets):
+                    current_ids = []
+                    for table in worksheet.tables:
+                        current_ids.append(next_table_id)
+                        table_entries.append((next_table_id, table))
+                        next_table_id += 1
+                    sheet_table_ids[sheet_index] = tuple(current_ids)
+                package.writestr(
+                    "[Content_Types].xml",
+                    content_types(len(sheets), len(table_entries)),
+                )
                 package.writestr("_rels/.rels", _root_rels())
-                package.writestr("xl/workbook.xml", workbook_xml(sheets))
+                package.writestr(
+                    "xl/workbook.xml",
+                    workbook_xml(sheets, self.workbook.named_ranges),
+                )
                 package.writestr("xl/_rels/workbook.xml.rels", workbook_rels(sheets))
                 package.writestr("xl/styles.xml", style_registry.xml())
                 for sheet_index, worksheet in enumerate(sheets):
+                    table_ids = sheet_table_ids[sheet_index]
                     package.writestr(
                         f"xl/worksheets/sheet{sheet_index + 1}.xml",
-                        sheet_xml(worksheet, style_registry),
+                        sheet_xml(worksheet, style_registry, table_ids),
+                    )
+                    if table_ids:
+                        package.writestr(
+                            f"xl/worksheets/_rels/sheet{sheet_index + 1}.xml.rels",
+                            worksheet_rels(table_ids),
+                        )
+                for table_id, table in table_entries:
+                    package.writestr(
+                        f"xl/tables/table{table_id}.xml",
+                        table_xml(table, table_id),
                     )
             os.replace(temporary_name, target)
             temporary_name = None
@@ -593,5 +791,7 @@ __all__ = [
     "workbook_rels",
     "cell_xml",
     "formula_xml",
+    "table_xml",
+    "worksheet_rels",
     "sheet_xml",
 ]

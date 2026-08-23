@@ -1,5 +1,21 @@
 # 更新日志
 
+## 0.4.0 - 2026-08-23
+
+- 增加 `Workbook.calculate()` 受控公式计算器，支持基础算术、比较、跨工作表
+  A1 引用、递归依赖和常用数学、文本、逻辑函数；严格模式统一抛出
+  `FormulaCalculationError`。
+- 公式结果与普通值彻底分离：增加 `Cell.cached_value`、`formula_status` 和
+  `calculation_error`；XLSX 可读取和写出 `<v>` 缓存，并声明由 Excel/WPS 自动重算。
+- 增加 `Cell.copy_style(source)`，只复制完整不可变样式，不复制值、公式或缓存。
+- 增加 `Range.clear()`、`clear_values()`、`clear_styles()` 和 `copy_to()`；区域复制
+  支持独立控制值、公式、样式，并按行列偏移转换相对 A1 引用。
+- 增加工作簿级命名区域：`add_named_range()`、`named_range()`、`named_ranges`、
+  `remove_named_range()`，支持 XLSX 保存和读取。
+- 增加基础 Excel 数据表：`Worksheet.add_table()`、`table()`、`tables`、
+  `remove_table()`，支持名称、区域、表头、样式和行列条纹的 XLSX 往返。
+- 同步更新完整中文 API 手册、README、可运行示例和自动化回归测试。
+
 ## 0.3.0 - 2026-08-23
 
 - 收敛顶层导出：`excelkit` 仅保留 `Workbook`、`Worksheet`、`Cell`、`CellValue`、

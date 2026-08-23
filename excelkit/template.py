@@ -9,7 +9,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from .address import MAX_ROW
+from .address import MAX_COLUMN, MAX_ROW, column_to_index, index_to_column
 from .core.worksheet import _normalize_value
 from .errors import TemplateError
 
@@ -327,15 +327,18 @@ def _render_text(
     return "".join(parts)
 
 
-def _translate_formula(formula: str, row_offset: int) -> str:
-    """功能：按行偏移调整公式中的相对 A1 行引用。
+def _translate_formula(
+    formula: str, row_offset: int, column_offset: int = 0
+) -> str:
+    """功能：按行列偏移调整公式中的相对 A1 引用。
 
     使用方法：循环复制公式或移动循环下方公式时内部调用。
-    参数：``formula`` 为带或不带等号的公式；``row_offset`` 为有符号行偏移量。
-    返回：相对行号已调整、绝对行号保持不变的公式字符串。
-    异常：调整后行号越出 Excel 上限时抛出 :class:`TemplateError`。
+    参数：``formula`` 为带或不带等号的公式；``row_offset``、``column_offset``
+    为有符号偏移量。
+    返回：相对行列已调整、带 ``$`` 的绝对维度保持不变的公式字符串。
+    异常：调整后行列越出 Excel 上限时抛出 :class:`TemplateError`。
     """
-    if row_offset == 0:
+    if row_offset == 0 and column_offset == 0:
         return formula
 
     def replace(match: re.Match[str]) -> str:
@@ -346,12 +349,16 @@ def _translate_formula(formula: str, row_offset: int) -> str:
         返回：调整后的单元格引用字符串。
         """
         column_absolute, column, row_absolute, row_text = match.groups()
-        if row_absolute:
-            return match.group(0)
-        row_number = int(row_text) + row_offset
+        column_text = column
+        if not column_absolute:
+            column_index = column_to_index(column) + column_offset
+            if not 0 <= column_index < MAX_COLUMN:
+                raise TemplateError("复制后的公式列引用超出 Excel 上限")
+            column_text = index_to_column(column_index)
+        row_number = int(row_text) if row_absolute else int(row_text) + row_offset
         if not 1 <= row_number <= MAX_ROW:
-            raise TemplateError("循环展开后的公式行引用超出 Excel 上限")
-        return f"{column_absolute}{column}{row_absolute}{row_number}"
+            raise TemplateError("复制后的公式行引用超出 Excel 上限")
+        return f"{column_absolute}{column_text}{row_absolute}{row_number}"
 
     segments = re.split(r'("(?:[^"]|"")*")', formula)
     return "".join(
@@ -626,6 +633,9 @@ def render_workbook(
         values, formulas, styles, max_row, max_column = result
         worksheet._values._values = values
         worksheet._formulas = formulas
+        # 模板替换或循环移动可能改变公式，旧缓存结果统一失效。
+        worksheet._formula_values = {}
+        worksheet._formula_errors = {}
         worksheet._styles = styles
         worksheet._max_row = max_row
         worksheet._max_column = max_column

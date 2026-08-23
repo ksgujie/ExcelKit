@@ -21,10 +21,15 @@ class TemplateError(ExcelKitError, ValueError):
     """模板标签、循环结构或渲染数据不符合要求时抛出。"""
 
 
+class FormulaCalculationError(ExcelKitError, ValueError):
+    """公式无法解析、计算或存在循环引用时抛出。"""
+
+
 __all__ = [
     "ExcelKitError",
     "InvalidAddressError",
     "InvalidWorksheetNameError",
     "InvalidFileError",
     "TemplateError",
+    "FormulaCalculationError",
 ]
