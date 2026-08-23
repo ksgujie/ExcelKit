@@ -11,7 +11,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Set, Type, TypeVar
 
-from ..address import cell_index
+from ..address import cell_address, cell_index, column_to_index, parse_range
+from ..core.page import HeaderFooter, PageMargins
 from ..errors import InvalidFileError
 from ..style import DEFAULT_STYLE, Style
 from .styles import _read_styles
@@ -25,6 +26,12 @@ _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _INTEGER_PATTERN = re.compile(r"^[+-]?\d+$")
+_ABSOLUTE_AREA_PATTERN = re.compile(
+    r"\$([A-Za-z]{1,3})\$(\d+):\$([A-Za-z]{1,3})\$(\d+)"
+)
+_ABSOLUTE_ROW_PATTERN = re.compile(r"\$(\d+):\$(\d+)")
+_ABSOLUTE_COLUMN_PATTERN = re.compile(r"\$([A-Za-z]{1,3}):\$([A-Za-z]{1,3})")
+_PAPER_SIZE_NAMES = {1: "Letter", 5: "Legal", 8: "A3", 9: "A4", 11: "A5"}
 
 
 def _tag(namespace: str, local_name: str) -> str:
@@ -189,6 +196,232 @@ def _cell_value(
     return _excel_serial(float(number), date_1904) if style_index in date_styles else number
 
 
+def _bool_attribute(value: str | None, default: bool = False) -> bool:
+    """功能：把Open XML布尔属性文本转换为Python布尔值。
+
+    使用方法：读取工作表视图和打印开关时内部调用。
+    参数：``value`` 为 ``1/0``、``true/false`` 或 ``None``；``default`` 为缺失值。
+    返回：解析后的布尔值。
+    """
+    if value is None:
+        return default
+    return value in {"1", "true", "True"}
+
+
+def _header_footer(value: str | None) -> HeaderFooter:
+    """功能：把Excel的 ``&L/&C/&R`` 文本拆分为HeaderFooter对象。
+
+    使用方法：读取奇数页页眉和页脚时内部调用。
+    参数：``value`` 为控制代码字符串或 ``None``；``&&`` 作为字面量与号保留。
+    返回：左、中、右区域组成的 :class:`HeaderFooter`。
+    """
+    if not value:
+        return HeaderFooter()
+    sections = {"L": [], "C": [], "R": []}
+    current = "C"
+    index = 0
+    while index < len(value):
+        if value[index] == "&" and index + 1 < len(value):
+            code = value[index + 1]
+            if code == "&":
+                sections[current].append("&&")
+                index += 2
+                continue
+            if code in sections:
+                current = code
+                index += 2
+                continue
+        sections[current].append(value[index])
+        index += 1
+    return HeaderFooter(
+        left="".join(sections["L"]),
+        center="".join(sections["C"]),
+        right="".join(sections["R"]),
+    )
+
+
+def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
+    """功能：读取工作表合并、尺寸、视图、筛选和页面打印设置。
+
+    使用方法：单张工作表值和样式读取完成后调用。
+    参数：``root`` 为工作表XML根元素；``worksheet`` 为目标工作表。
+    返回：``None``；解析结果写入目标对象。
+    异常：地址、数值或页面属性损坏时抛出 :class:`InvalidFileError`。
+    """
+    try:
+        sheet_view = root.find(
+            f"{_tag(_MAIN_NS, 'sheetViews')}/{_tag(_MAIN_NS, 'sheetView')}"
+        )
+        if sheet_view is not None:
+            worksheet.show_gridlines = _bool_attribute(
+                sheet_view.get("showGridLines"), True
+            )
+            pane = sheet_view.find(_tag(_MAIN_NS, "pane"))
+            if pane is not None and pane.get("state") in {"frozen", "frozenSplit"}:
+                top_left = pane.get("topLeftCell")
+                if top_left:
+                    worksheet.freeze = top_left
+                else:
+                    row = int(float(pane.get("ySplit", "0")))
+                    column = int(float(pane.get("xSplit", "0")))
+                    worksheet.freeze = cell_address(row, column)
+
+        columns = root.find(_tag(_MAIN_NS, "cols"))
+        if columns is not None:
+            for source in columns.findall(_tag(_MAIN_NS, "col")):
+                minimum = int(source.get("min", "0")) - 1
+                maximum = int(source.get("max", "0")) - 1
+                if minimum < 0 or maximum < minimum:
+                    raise ValueError("无效的列尺寸范围")
+                width = (
+                    float(source.get("width", "0"))
+                    if "width" in source.attrib else None
+                )
+                hidden = _bool_attribute(source.get("hidden"))
+                for column_index in range(minimum, maximum + 1):
+                    dimension = worksheet.column(column_index)
+                    dimension.width = width
+                    dimension.hidden = hidden
+
+        sheet_data = root.find(_tag(_MAIN_NS, "sheetData"))
+        if sheet_data is not None:
+            for source in sheet_data.findall(_tag(_MAIN_NS, "row")):
+                row_index = int(source.get("r", "0")) - 1
+                if row_index < 0:
+                    raise ValueError("无效的行尺寸索引")
+                if "ht" in source.attrib or _bool_attribute(source.get("hidden")):
+                    dimension = worksheet.row(row_index)
+                    dimension.height = (
+                        float(source.get("ht", "0"))
+                        if "ht" in source.attrib else None
+                    )
+                    dimension.hidden = _bool_attribute(source.get("hidden"))
+
+        merge_cells = root.find(_tag(_MAIN_NS, "mergeCells"))
+        if merge_cells is not None:
+            for source in merge_cells.findall(_tag(_MAIN_NS, "mergeCell")):
+                reference = source.get("ref")
+                if not reference:
+                    raise ValueError("合并区域缺少地址")
+                worksheet._merge_range(*parse_range(reference))
+
+        auto_filter = root.find(_tag(_MAIN_NS, "autoFilter"))
+        if auto_filter is not None and auto_filter.get("ref"):
+            reference = auto_filter.get("ref") or ""
+            worksheet.filter_range = (
+                reference if ":" in reference else f"{reference}:{reference}"
+            )
+
+        options = root.find(_tag(_MAIN_NS, "printOptions"))
+        if options is not None:
+            worksheet.page.center_horizontal = _bool_attribute(
+                options.get("horizontalCentered")
+            )
+            worksheet.page.center_vertical = _bool_attribute(
+                options.get("verticalCentered")
+            )
+            worksheet.page.print_gridlines = _bool_attribute(options.get("gridLines"))
+            worksheet.page.print_headings = _bool_attribute(options.get("headings"))
+
+        margins = root.find(_tag(_MAIN_NS, "pageMargins"))
+        if margins is not None:
+            defaults = worksheet.page.margins
+            worksheet.page.margins = PageMargins(
+                **{
+                    name: float(margins.get(name, str(getattr(defaults, name) / 2.54)))
+                    * 2.54
+                    for name in ("left", "right", "top", "bottom", "header", "footer")
+                }
+            )
+
+        setup = root.find(_tag(_MAIN_NS, "pageSetup"))
+        if setup is not None:
+            if setup.get("orientation") in {"portrait", "landscape"}:
+                worksheet.page.orientation = setup.get("orientation")
+            if setup.get("paperSize"):
+                paper_code = int(setup.get("paperSize", "9"))
+                if paper_code in _PAPER_SIZE_NAMES:
+                    worksheet.page.paper_size = _PAPER_SIZE_NAMES[paper_code]
+            if setup.get("pageOrder") in {"downThenOver", "overThenDown"}:
+                worksheet.page.order = (
+                    "down_then_over"
+                    if setup.get("pageOrder") == "downThenOver"
+                    else "over_then_down"
+                )
+            worksheet.page.black_and_white = _bool_attribute(
+                setup.get("blackAndWhite")
+            )
+            worksheet.page.draft = _bool_attribute(setup.get("draft"))
+            fit_width = int(setup.get("fitToWidth", "0")) or None
+            fit_height = int(setup.get("fitToHeight", "0")) or None
+            if fit_width is not None or fit_height is not None:
+                worksheet.page.fit(width=fit_width, height=fit_height)
+            elif setup.get("scale"):
+                worksheet.page.scale = int(setup.get("scale", "100"))
+            if _bool_attribute(setup.get("useFirstPageNumber")) and setup.get(
+                "firstPageNumber"
+            ):
+                worksheet.page.first_page_number = int(
+                    setup.get("firstPageNumber", "1")
+                )
+
+        header_footer = root.find(_tag(_MAIN_NS, "headerFooter"))
+        if header_footer is not None:
+            odd_header = header_footer.find(_tag(_MAIN_NS, "oddHeader"))
+            odd_footer = header_footer.find(_tag(_MAIN_NS, "oddFooter"))
+            worksheet.page.header = _header_footer(
+                odd_header.text if odd_header is not None else None
+            )
+            worksheet.page.footer = _header_footer(
+                odd_footer.text if odd_footer is not None else None
+            )
+    except (TypeError, ValueError, KeyError) as error:
+        raise InvalidFileError("工作表布局或打印设置无效") from error
+
+
+def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
+    """功能：读取打印区域和重复打印行列的工作簿定义名称。
+
+    使用方法：全部工作表加载完成后调用。
+    参数：``root`` 为workbook.xml根元素；``workbook`` 为目标工作簿。
+    返回：``None``；只处理带本地工作表索引的标准打印名称。
+    异常：本库支持的定义名称内容损坏时抛出 :class:`InvalidFileError`。
+    """
+    container = root.find(_tag(_MAIN_NS, "definedNames"))
+    if container is None:
+        return
+    try:
+        for item in container.findall(_tag(_MAIN_NS, "definedName")):
+            if item.text is None or item.get("localSheetId") is None:
+                continue
+            sheet_index = int(item.get("localSheetId", "-1"))
+            if not 0 <= sheet_index < len(workbook.sheets):
+                continue
+            page = workbook.sheet(sheet_index).page
+            if item.get("name") == "_xlnm.Print_Area":
+                match = _ABSOLUTE_AREA_PATTERN.search(item.text)
+                if match:
+                    page.area = (
+                        f"{match.group(1)}{match.group(2)}:"
+                        f"{match.group(3)}{match.group(4)}"
+                    )
+            elif item.get("name") == "_xlnm.Print_Titles":
+                row_match = _ABSOLUTE_ROW_PATTERN.search(item.text)
+                column_match = _ABSOLUTE_COLUMN_PATTERN.search(item.text)
+                if row_match:
+                    page.repeat_rows = (
+                        int(row_match.group(1)) - 1,
+                        int(row_match.group(2)) - 1,
+                    )
+                if column_match:
+                    page.repeat_columns = (
+                        column_to_index(column_match.group(1)),
+                        column_to_index(column_match.group(2)),
+                    )
+    except (TypeError, ValueError) as error:
+        raise InvalidFileError("打印区域或重复标题定义无效") from error
+
+
 def _load_sheet(
     package: zipfile.ZipFile,
     member: str,
@@ -237,6 +470,7 @@ def _load_sheet(
             worksheet._values.set(row, column, value)
         if style != DEFAULT_STYLE:
             worksheet._styles[(row, column)] = style
+    _load_sheet_layout(root, worksheet)
 
 
 def _load_xlsx(
@@ -278,6 +512,7 @@ def _load_xlsx(
                 package, targets[relationship_id], worksheet, shared_strings,
                 styles, date_styles, date_1904
             )
+        _load_defined_names(workbook_root, workbook)
         return workbook
 
 

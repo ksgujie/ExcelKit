@@ -227,6 +227,102 @@ class WorksheetTests(unittest.TestCase):
             self.worksheet["B1"] = "#2026-2-30 12:00"
         self.assertEqual(self.worksheet["B1"].value, "保留")
 
+    def test_cell_set_value_and_as_date_chain(self):
+        """功能：验证链式写值、显式日期转换、返回值及失败原子性。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言 ``set_value().as_date()`` 使用同一 Cell 并正确转换。
+        """
+        cell = self.worksheet.cell("a1")
+        self.assertIs(cell.set_value("2026-8-1"), cell)
+        self.assertEqual(cell.as_date(), date(2026, 8, 1))
+        self.assertEqual(cell.value, date(2026, 8, 1))
+
+        self.assertEqual(
+            cell.set_value("2026/8/2 12:33").as_date(), date(2026, 8, 2)
+        )
+        self.assertEqual(cell.value, date(2026, 8, 2))
+        self.assertEqual(
+            cell.set_value(datetime(2026, 8, 3, 8, 30)).as_date(),
+            date(2026, 8, 3),
+        )
+        self.assertEqual(cell.value, date(2026, 8, 3))
+
+        cell.set_value("保留")
+        with self.assertRaises(ValueError):
+            cell.as_date()
+        self.assertEqual(cell.value, "保留")
+        cell.set_value(20260801)
+        with self.assertRaises(TypeError):
+            cell.as_date()
+        self.assertEqual(cell.value, 20260801)
+
+    def test_cell_write_back_type_converters(self):
+        """功能：验证六种 ``Cell.as_*`` 转换均写回并直接返回目标类型。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言链式转换结果、单元格值和严格转换规则。
+        """
+        cell = self.worksheet["A1"]
+        self.assertEqual(cell.set_value(123).as_string(), "123")
+        self.assertEqual(cell.value, "123")
+        self.assertEqual(cell.set_value("-42").as_int(), -42)
+        self.assertIs(type(cell.value), int)
+        self.assertEqual(cell.set_value("1.25e2").as_float(), 125.0)
+        self.assertIs(type(cell.value), float)
+        self.assertIs(cell.set_value("是").as_bool(), True)
+        self.assertIs(cell.value, True)
+        self.assertEqual(
+            cell.set_value("2026-8-1 12:33:04").as_datetime(),
+            datetime(2026, 8, 1, 12, 33, 4),
+        )
+        self.assertEqual(cell.set_value(None).as_string(), "")
+        self.assertFalse(hasattr(cell, "as_str"))
+
+        invalid_cases = [
+            ("12.5", "as_int", ValueError),
+            (True, "as_float", TypeError),
+            (2, "as_bool", ValueError),
+            ("not-a-date", "as_datetime", ValueError),
+        ]
+        for original, method_name, error_type in invalid_cases:
+            with self.subTest(method=method_name):
+                cell.set_value(original)
+                with self.assertRaises(error_type):
+                    getattr(cell, method_name)()
+                self.assertEqual(cell.value, original)
+
+    def test_cell_read_converters_do_not_write_back(self):
+        """功能：验证 ``Cell.read().as_*`` 只转换快照且不影响工作表保存值。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言所有只读转换返回目标类型并保持原单元格值不变。
+        """
+        cell = self.worksheet["A1"]
+        cases = [
+            (123, "as_string", "123"),
+            ("42", "as_int", 42),
+            ("12.5", "as_float", 12.5),
+            ("yes", "as_bool", True),
+            ("2026/8/1", "as_date", date(2026, 8, 1)),
+            ("2026-8-1 12:33", "as_datetime", datetime(2026, 8, 1, 12, 33)),
+        ]
+        for original, method_name, expected in cases:
+            with self.subTest(method=method_name):
+                cell.value = original
+                result = getattr(cell.read(), method_name)()
+                self.assertEqual(result, expected)
+                self.assertEqual(cell.value, original)
+
+        cell.value = "7"
+        snapshot = cell.read()
+        cell.value = "8"
+        self.assertEqual(snapshot.as_int(), 7)
+        self.assertEqual(cell.value, "8")
+
     def test_worksheet_values_and_cell_style(self):
         """功能：验证工作表全部值属性和不可变单元格样式。
 

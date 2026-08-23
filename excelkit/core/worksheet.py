@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
-from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from ..address import (
@@ -17,15 +15,13 @@ from ..address import (
 from ..storage import ValueStore
 from ..style import DEFAULT_STYLE, Style, _color
 from .cell import Cell
+from .conversion import normalize_value
+from .dimension import ColumnDimension, RowDimension
+from .page import PageSettings
 from .range import Range
 
 if TYPE_CHECKING:
     from .workbook import Workbook
-
-_DATE_LITERAL_PATTERN = re.compile(
-    r"^#(\d{4})([-/])(\d{1,2})\2(\d{1,2})"
-    r"(?: (\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$"
-)
 
 
 def _normalize_value(value: Any) -> Any:
@@ -39,21 +35,7 @@ def _normalize_value(value: Any) -> Any:
     :class:`datetime.datetime`；未匹配字面量时返回原值。
     异常：格式匹配但日期或时间取值无效时抛出 ``ValueError``。
     """
-    if not isinstance(value, str):
-        return value
-    match = _DATE_LITERAL_PATTERN.fullmatch(value)
-    if match is None:
-        return value
-    try:
-        year, month, day = (int(match.group(index)) for index in (1, 3, 4))
-        if match.group(5) is None:
-            return date(year, month, day)
-        hour = int(match.group(5))
-        minute = int(match.group(6))
-        second = int(match.group(7) or 0)
-        return datetime(year, month, day, hour, minute, second)
-    except ValueError as error:
-        raise ValueError(f"无效的日期字面量：{value!r}") from error
+    return normalize_value(value)
 
 
 class Worksheet:
@@ -66,6 +48,13 @@ class Worksheet:
         "_values",
         "_formulas",
         "_styles",
+        "_merged_ranges",
+        "_rows",
+        "_columns",
+        "_freeze",
+        "_filter_range",
+        "_show_gridlines",
+        "_page",
         "_max_row",
         "_max_column",
     )
@@ -83,6 +72,13 @@ class Worksheet:
         self._values = ValueStore()
         self._formulas: Dict[Tuple[int, int], str] = {}
         self._styles: Dict[Tuple[int, int], Style] = {}
+        self._merged_ranges: list[Tuple[int, int, int, int]] = []
+        self._rows: Dict[int, RowDimension] = {}
+        self._columns: Dict[int, ColumnDimension] = {}
+        self._freeze: Optional[str] = None
+        self._filter_range: Optional[str] = None
+        self._show_gridlines = True
+        self._page = PageSettings()
         self._max_row = -1
         self._max_column = -1
 
@@ -162,6 +158,125 @@ class Worksheet:
         异常：地址、边界或方向无效时抛出 ``InvalidAddressError``。
         """
         return Range(self, *parse_range(address))
+
+    def row(self, index: int) -> RowDimension:
+        """功能：按0-based索引取得可设置行高和隐藏状态的行对象。
+
+        使用方法：``worksheet.row(0).height = 28``。
+        参数：``index`` 为0～1048575的整数，布尔值不作为索引。
+        返回：当前行唯一的 :class:`RowDimension` 对象，重复读取返回同一实例。
+        异常：索引无效时抛出 ``InvalidAddressError``。
+        """
+        validate_row_index(index)
+        if index not in self._rows:
+            self._rows[index] = RowDimension(index)
+        return self._rows[index]
+
+    def column(self, index: int) -> ColumnDimension:
+        """功能：按0-based索引取得可设置列宽和隐藏状态的列对象。
+
+        使用方法：``worksheet.column(0).width = 20``。
+        参数：``index`` 为0～16383的整数，布尔值不作为索引。
+        返回：当前列唯一的 :class:`ColumnDimension` 对象，重复读取返回同一实例。
+        异常：索引无效时抛出 ``InvalidAddressError``。
+        """
+        validate_column_index(index)
+        if index not in self._columns:
+            self._columns[index] = ColumnDimension(index)
+        return self._columns[index]
+
+    @property
+    def merged_ranges(self) -> tuple[Range, ...]:
+        """功能：取得全部合并区域的只读顺序快照。
+
+        使用方法：``for area in worksheet.merged_ranges: print(area.address)``。
+        参数：无；修改合并状态使用 ``Range.merge()`` 或 ``Range.unmerge()``。
+        返回：按左上角位置排序的 ``tuple[Range, ...]``。
+        """
+        return tuple(Range(self, *bounds) for bounds in self._merged_ranges)
+
+    @property
+    def freeze(self) -> Optional[str]:
+        """功能：读取冻结窗格后的第一个可滚动单元格地址。
+
+        使用方法：``address = worksheet.freeze``。
+        参数：无。
+        返回：大写A1地址或没有冻结窗格时的 ``None``。
+        """
+        return self._freeze
+
+    @freeze.setter
+    def freeze(self, address: Optional[str]) -> None:
+        """功能：设置或清除冻结行列。
+
+        使用方法：``worksheet.freeze = "B2"`` 冻结第一行和第一列；赋值
+        ``None`` 或 ``"A1"`` 清除冻结。
+        参数：``address`` 为第一个可滚动单元格的A1地址或 ``None``。
+        返回：``None``。
+        异常：地址类型、格式或边界无效时抛出 ``InvalidAddressError``。
+        """
+        if address is None:
+            self._freeze = None
+            return
+        row, column = cell_index(address)
+        self._freeze = None if (row, column) == (0, 0) else cell_address(row, column)
+
+    @property
+    def filter_range(self) -> Optional[str]:
+        """功能：读取工作表自动筛选区域。
+
+        使用方法：``address = worksheet.filter_range``。
+        参数：无。
+        返回：大写A1矩形区域或未启用筛选时的 ``None``。
+        """
+        return self._filter_range
+
+    @filter_range.setter
+    def filter_range(self, address: Optional[str]) -> None:
+        """功能：设置或清除一块连续区域的自动筛选按钮。
+
+        使用方法：``worksheet.filter_range = "A1:F100"``；赋值 ``None`` 清除。
+        参数：``address`` 为合法A1矩形区域字符串或 ``None``。
+        返回：``None``。
+        异常：地址无效时抛出 ``InvalidAddressError``。
+        """
+        if address is None:
+            self._filter_range = None
+            return
+        self._filter_range = Range(self, *parse_range(address)).address
+
+    @property
+    def show_gridlines(self) -> bool:
+        """功能：读取Excel屏幕是否显示工作表网格线。
+
+        使用方法：``visible = worksheet.show_gridlines``。
+        参数：无。
+        返回：布尔值；此属性不控制打印网格线。
+        """
+        return self._show_gridlines
+
+    @show_gridlines.setter
+    def show_gridlines(self, value: bool) -> None:
+        """功能：设置Excel屏幕中的工作表网格线可见性。
+
+        使用方法：``worksheet.show_gridlines = False``。
+        参数：``value`` 必须是布尔值。
+        返回：``None``。
+        异常：类型无效时抛出 ``TypeError``。
+        """
+        if not isinstance(value, bool):
+            raise TypeError("show_gridlines 必须是布尔值")
+        self._show_gridlines = value
+
+    @property
+    def page(self) -> PageSettings:
+        """功能：取得当前工作表唯一的页面和打印设置对象。
+
+        使用方法：``worksheet.page.orientation = "landscape"``。
+        参数：无；属性本身只读，不允许整体替换。
+        返回：当前 :class:`PageSettings`。
+        """
+        return self._page
 
     @property
     def max_row(self) -> int:
@@ -256,6 +371,68 @@ class Worksheet:
         self._max_row = max(self._max_row, row)
         self._max_column = max(self._max_column, column)
 
+    def _merged_anchor(self, row: int, column: int) -> Optional[Tuple[int, int]]:
+        """功能：查询坐标所属合并区域的左上角锚点。
+
+        使用方法：普通值和公式写入前内部调用。
+        参数：``row``、``column`` 为0-based行列索引，顺序先行后列。
+        返回：属于合并区域时返回锚点元组，否则返回 ``None``。
+        """
+        for min_row, min_column, max_row, max_column in self._merged_ranges:
+            if min_row <= row <= max_row and min_column <= column <= max_column:
+                return min_row, min_column
+        return None
+
+    def _merge_range(
+        self, min_row: int, min_column: int, max_row: int, max_column: int
+    ) -> None:
+        """功能：原子登记一个不重叠的多单元格合并区域。
+
+        使用方法：仅由 ``Range.merge()`` 调用。
+        参数：四项为0-based最小行、最小列、最大行、最大列，顺序先行后列。
+        返回：``None``；完全相同的区域重复合并视为幂等操作。
+        异常：单格区域、重叠区域或非锚点单元格存在值或公式时抛出 ``ValueError``。
+        """
+        bounds = (min_row, min_column, max_row, max_column)
+        if min_row == max_row and min_column == max_column:
+            raise ValueError("合并区域必须至少包含两个单元格")
+        for existing in self._merged_ranges:
+            if existing == bounds:
+                return
+            a, b, c, d = existing
+            overlaps = not (
+                max_row < a or min_row > c or max_column < b or min_column > d
+            )
+            if overlaps:
+                raise ValueError("合并区域不能与已有合并区域重叠")
+        for row in range(min_row, max_row + 1):
+            for column in range(min_column, max_column + 1):
+                if (row, column) == (min_row, min_column):
+                    continue
+                if (
+                    self._values.get(row, column) is not None
+                    or (row, column) in self._formulas
+                ):
+                    raise ValueError("合并前除左上角外的单元格必须为空")
+        self._merged_ranges.append(bounds)
+        self._merged_ranges.sort()
+        self._touch(max_row, max_column)
+
+    def _unmerge_range(
+        self, min_row: int, min_column: int, max_row: int, max_column: int
+    ) -> None:
+        """功能：删除与给定边界完全相同的合并区域记录。
+
+        使用方法：仅由 ``Range.unmerge()`` 调用。
+        参数：四项为0-based区域边界，顺序先行后列。
+        返回：``None``；单元格内容和样式不改变。
+        异常：区域没有被完整合并时抛出 ``ValueError``。
+        """
+        bounds = (min_row, min_column, max_row, max_column)
+        if bounds not in self._merged_ranges:
+            raise ValueError("当前区域不是一个完整的合并区域")
+        self._merged_ranges.remove(bounds)
+
     def _set_value(self, row: int, column: int, value: Any) -> None:
         """功能：设置普通值并清除同一位置的公式。
 
@@ -265,6 +442,9 @@ class Worksheet:
         返回：``None``。
         异常：索引无效时抛出 ``InvalidAddressError``。
         """
+        anchor = self._merged_anchor(row, column)
+        if anchor is not None and anchor != (row, column):
+            raise ValueError("只能向合并区域的左上角单元格写入值")
         normalized_value = _normalize_value(value)
         self._touch(row, column)
         self._formulas.pop((row, column), None)
@@ -292,6 +472,9 @@ class Worksheet:
         异常：公式不是字符串、为空或只有 ``=`` 时抛出 ``TypeError``；索引无效时
         抛出 ``InvalidAddressError``。
         """
+        anchor = self._merged_anchor(row, column)
+        if anchor is not None and anchor != (row, column):
+            raise ValueError("只能向合并区域的左上角单元格写入公式")
         if not isinstance(formula, str):
             raise TypeError("公式必须是非空字符串")
         expression = formula.strip()

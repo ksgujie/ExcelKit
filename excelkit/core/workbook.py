@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from collections.abc import Mapping
 from typing import Any, Dict, Tuple, Union
 
@@ -115,6 +116,68 @@ class Workbook:
         if isinstance(name, int) and not isinstance(name, bool):
             return self._sheets[name]
         raise TypeError("工作表标识必须是名称字符串或整数索引")
+
+    def remove_sheet(self, name_or_index: Union[str, int]) -> "Workbook":
+        """功能：按名称或0-based索引删除一张工作表。
+
+        使用方法：``workbook.remove_sheet("临时表")`` 或
+        ``workbook.remove_sheet(0)``。
+        参数：``name_or_index`` 的规则与 :meth:`sheet` 完全一致。
+        返回：当前 :class:`Workbook`，支持继续 ``save()`` 链式调用。
+        异常：名称不存在、索引越界或参数类型无效时透传 ``sheet()`` 的异常。
+        """
+        worksheet = self.sheet(name_or_index)
+        self._sheets.remove(worksheet)
+        self._sheets_by_name.pop(worksheet.label)
+        return self
+
+    def move_sheet(self, name_or_index: Union[str, int], index: int) -> "Workbook":
+        """功能：把一张工作表移动到指定0-based最终位置。
+
+        使用方法：``workbook.move_sheet("统计", 0)``。
+        参数：``name_or_index`` 标识待移动工作表；``index`` 为移动后位置，必须是
+        当前工作表范围内的非负0-based整数，布尔值不作为索引。
+        返回：当前 :class:`Workbook`，工作表对象及内容保持不变。
+        异常：目标索引类型无效时抛出 ``TypeError``，越界时抛出 ``IndexError``；
+        工作表标识错误时透传 :meth:`sheet` 的异常。
+        """
+        worksheet = self.sheet(name_or_index)
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError("目标工作表索引必须是0-based整数")
+        if not 0 <= index < len(self._sheets):
+            raise IndexError("目标工作表索引越界")
+        self._sheets.remove(worksheet)
+        self._sheets.insert(index, worksheet)
+        return self
+
+    def copy_sheet(
+        self, name_or_index: Union[str, int], new_name: str
+    ) -> Worksheet:
+        """功能：完整复制工作表内容、布局和打印设置到工作簿末尾。
+
+        使用方法：``copied = workbook.copy_sheet("模板", "八月报表")``。
+        参数：``name_or_index`` 标识源工作表；``new_name`` 为必须显式提供的唯一
+        工作表名称。
+        返回：新创建的 :class:`Worksheet`。
+        异常：源标识、名称或名称重复时透传 :meth:`sheet`、:meth:`add_sheet`
+        的相应异常。
+        """
+        source = self.sheet(name_or_index)
+        target = self.add_sheet(new_name)
+        target._label_color = source._label_color
+        target._values._values = dict(source._values._values)
+        target._formulas = dict(source._formulas)
+        target._styles = dict(source._styles)
+        target._merged_ranges = list(source._merged_ranges)
+        target._rows = deepcopy(source._rows)
+        target._columns = deepcopy(source._columns)
+        target._freeze = source._freeze
+        target._filter_range = source._filter_range
+        target._show_gridlines = source._show_gridlines
+        target._page = deepcopy(source._page)
+        target._max_row = source._max_row
+        target._max_column = source._max_column
+        return target
 
     @property
     def sheets(self) -> Tuple[Worksheet, ...]:

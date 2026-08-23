@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 import xlwt
 
+from ..core.page import header_footer_text
 from ..style import DEFAULT_STYLE, Style
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ _VERTICAL_ALIGNMENTS = {
     "justify": xlwt.Alignment.VERT_JUSTIFIED,
     "distributed": xlwt.Alignment.VERT_DISTRIBUTED,
 }
+_PAPER_SIZE_CODES = {"Letter": 1, "Legal": 5, "A3": 8, "A4": 9, "A5": 11}
 
 
 class _StyleRegistry:
@@ -186,12 +188,66 @@ class XlsWriter:
             if worksheet.max_row >= 65536 or worksheet.max_column >= 256:
                 raise ValueError("XLS 仅支持 65536 行和 256 列，当前数据已超过格式上限")
             target_sheet = output.add_sheet(worksheet.label)
+            target_sheet.set_show_grid(worksheet.show_gridlines)
+            for row_index, dimension in worksheet._rows.items():
+                if dimension._is_default():
+                    continue
+                target_row = target_sheet.row(row_index)
+                if dimension.height is not None:
+                    target_row.height = int(round(dimension.height * 20))
+                    target_row.height_mismatch = True
+                target_row.hidden = int(dimension.hidden)
+            for column_index, dimension in worksheet._columns.items():
+                if dimension._is_default():
+                    continue
+                target_column = target_sheet.col(column_index)
+                if dimension.width is not None:
+                    target_column.width = int(round(dimension.width * 256))
+                target_column.hidden = int(dimension.hidden)
+            if worksheet.freeze is not None:
+                from ..address import cell_index
+
+                freeze_row, freeze_column = cell_index(worksheet.freeze)
+                target_sheet.set_panes_frozen(True)
+                target_sheet.set_horz_split_pos(freeze_row)
+                target_sheet.set_vert_split_pos(freeze_column)
+                target_sheet.set_horz_split_first_visible(freeze_row)
+                target_sheet.set_vert_split_first_visible(freeze_column)
+
+            page = worksheet.page
+            target_sheet.set_portrait(page.orientation == "portrait")
+            target_sheet.set_paper_size_code(_PAPER_SIZE_CODES[page.paper_size])
+            target_sheet.set_print_in_rows(page.order == "over_then_down")
+            target_sheet.set_print_colour(not page.black_and_white)
+            target_sheet.set_print_draft(page.draft)
+            target_sheet.set_print_centered_horz(page.center_horizontal)
+            target_sheet.set_print_centered_vert(page.center_vertical)
+            target_sheet.set_print_grid(page.print_gridlines)
+            target_sheet.set_print_headers(page.print_headings)
+            if page.scale is not None:
+                target_sheet.set_print_scaling(page.scale)
+            else:
+                target_sheet.set_fit_width_to_pages(page._fit_width or 0)
+                target_sheet.set_fit_height_to_pages(page._fit_height or 0)
+                target_sheet.set_fit_num_pages(1)
+            margins = page.margins
+            target_sheet.set_left_margin(margins.left / 2.54)
+            target_sheet.set_right_margin(margins.right / 2.54)
+            target_sheet.set_top_margin(margins.top / 2.54)
+            target_sheet.set_bottom_margin(margins.bottom / 2.54)
+            target_sheet.set_header_margin(margins.header / 2.54)
+            target_sheet.set_footer_margin(margins.footer / 2.54)
+            target_sheet._Worksheet__header_str = header_footer_text(page.header)
+            target_sheet._Worksheet__footer_str = header_footer_text(page.footer)
             coordinates = (
                 {coordinate for coordinate, _value in worksheet._values.items()}
                 | set(worksheet._formulas)
                 | set(worksheet._styles)
             )
             for row, column in sorted(coordinates):
+                anchor = worksheet._merged_anchor(row, column)
+                if anchor is not None and anchor != (row, column):
+                    continue
                 value = worksheet._values.get(row, column)
                 style = worksheet._styles.get((row, column), DEFAULT_STYLE)
                 target_style = registry.convert(style, _date_format(value))
@@ -204,6 +260,18 @@ class XlsWriter:
                     target_sheet.write(row, column, value, target_style)
                 else:
                     target_sheet.write(row, column, str(value), target_style)
+            for min_row, min_column, max_row, max_column in worksheet._merged_ranges:
+                anchor_value = worksheet._values.get(min_row, min_column)
+                anchor_style = worksheet._styles.get(
+                    (min_row, min_column), DEFAULT_STYLE
+                )
+                target_sheet.merge(
+                    min_row,
+                    max_row,
+                    min_column,
+                    max_column,
+                    registry.convert(anchor_style, _date_format(anchor_value)),
+                )
 
         temporary_name = None
         try:

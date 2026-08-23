@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Type, TypeVar
 
 import xlrd
 
+from ..address import cell_address
 from ..errors import InvalidFileError
 from ..style import Alignment, Border, DEFAULT_STYLE, Fill, Font, Side, Style
 
@@ -160,6 +161,28 @@ def _load_xls(
                     worksheet._values.set(row, column, value)
                 if style != DEFAULT_STYLE:
                     worksheet._styles[(row, column)] = style
+        for row_index, source_dimension in source_sheet.rowinfo_map.items():
+            dimension = worksheet.row(row_index)
+            if source_dimension.height and not source_dimension.has_default_height:
+                dimension.height = source_dimension.height / 20.0
+            dimension.hidden = bool(source_dimension.hidden)
+        for column_index, source_dimension in source_sheet.colinfo_map.items():
+            dimension = worksheet.column(column_index)
+            if source_dimension.width:
+                dimension.width = source_dimension.width / 256.0
+            dimension.hidden = bool(source_dimension.hidden)
+        for min_row, max_row, min_column, max_column in source_sheet.merged_cells:
+            try:
+                worksheet._merge_range(
+                    min_row, min_column, max_row - 1, max_column - 1
+                )
+            except ValueError as error:
+                raise InvalidFileError("XLS 合并区域无效") from error
+        if source_sheet.has_pane_record and source_sheet.panes_are_frozen:
+            row = int(source_sheet.horz_split_pos or 0)
+            column = int(source_sheet.vert_split_pos or 0)
+            if row or column:
+                worksheet.freeze = cell_address(row, column)
     return workbook
 
 

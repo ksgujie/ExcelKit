@@ -23,7 +23,7 @@ class TemplateTests(unittest.TestCase):
         sheet = workbook.active
         sheet["A1"] = "报表：{title}"
         sheet["A2"] = "{loop items}"
-        sheet["A3"] = "{items.@index}"
+        sheet["A3"] = "{items.@index + 1}"
         sheet["B3"] = "{items.name}"
         sheet["C3"] = "{items.quantity}"
         sheet["D3"].formula = '=LOG10(C3)+C3*{items.price}+"C3"'
@@ -56,8 +56,8 @@ class TemplateTests(unittest.TestCase):
         self.assertIs(result, workbook)
         sheet = workbook.active
         self.assertEqual(sheet["A1"].value, "报表：八月")
-        self.assertEqual(sheet["A2"].value, 0)
-        self.assertEqual(sheet["A3"].value, 1)
+        self.assertEqual(sheet["A2"].value, 1)
+        self.assertEqual(sheet["A3"].value, 2)
         self.assertEqual(sheet["B2"].value, "苹果")
         self.assertEqual(sheet["B3"].value, "梨")
         self.assertEqual(sheet["C2"].value, 2)
@@ -167,6 +167,87 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(
             workbook.active.values,
             [["甲"], ["乙"], ["中间"], ["丙"], ["结束"]],
+        )
+
+    def test_numeric_expressions_and_format_filter(self):
+        """功能：验证索引偏移、四则运算、括号及显示格式过滤器。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言计算结果保留数值类型、格式过滤结果为字符串。
+        """
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet["A1"] = "{loop items}"
+        sheet["A2"] = "{items.@index + 1}"
+        sheet["B2"] = "{items.quantity * items.price}"
+        sheet["C2"] = "{(items.price - items.discount) * items.quantity}"
+        sheet["D2"] = '{items.price | format:",.2f"}'
+        sheet["E2"] = '金额：{items.quantity * items.price | format:",.2f"}'
+        sheet["F2"] = "{items.quantity // divisor}"
+        sheet["G2"] = "{items.quantity % divisor}"
+        sheet["A3"] = "{/loop}"
+        workbook.render({
+            "divisor": 2,
+            "items": [
+                {"quantity": 3, "price": 1234.5, "discount": 34.5},
+                {"quantity": 4, "price": 8, "discount": 1},
+            ],
+        })
+
+        self.assertEqual(sheet["A1"].value, 1)
+        self.assertEqual(sheet["A2"].value, 2)
+        self.assertEqual(sheet["B1"].value, 3703.5)
+        self.assertEqual(sheet["B2"].value, 32)
+        self.assertEqual(sheet["C1"].value, 3600.0)
+        self.assertEqual(sheet["C2"].value, 28)
+        self.assertEqual(sheet["D1"].value, "1,234.50")
+        self.assertEqual(sheet["D2"].value, "8.00")
+        self.assertEqual(sheet["E1"].value, "金额：3,703.50")
+        self.assertEqual(sheet["F1"].value, 1)
+        self.assertEqual(sheet["G1"].value, 1)
+
+    def test_expression_errors_are_safe_and_atomic(self):
+        """功能：验证非法运算、除零和函数调用均报错且不会执行或修改工作簿。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言失败时由测试框架报告。
+        """
+        executed = []
+        cases = [
+            ("{value ** 2}", {"value": 3}),
+            ("{value / zero}", {"value": 3, "zero": 0}),
+            ('{value | format:"invalid"}', {"value": 3}),
+            ("{call(value)}", {"call": lambda _value: executed.append(True), "value": 3}),
+        ]
+        for template, data in cases:
+            with self.subTest(template=template):
+                workbook = Workbook()
+                workbook.active["A1"] = template
+                original = workbook.active.values
+                with self.assertRaises(TemplateError):
+                    workbook.render(data)
+                self.assertEqual(workbook.active.values, original)
+        self.assertEqual(executed, [])
+
+    def test_missing_expression_path_respects_strict_mode(self):
+        """功能：验证计算表达式缺失路径在严格和非严格模式下行为一致清晰。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；严格模式报错，非严格模式保留完整原标签。
+        """
+        strict_workbook = Workbook()
+        strict_workbook.active["A1"] = "{price * quantity}"
+        with self.assertRaises(TemplateError):
+            strict_workbook.render({"price": 8})
+
+        relaxed_workbook = Workbook()
+        relaxed_workbook.active["A1"] = "{price * quantity}"
+        relaxed_workbook.render({"price": 8}, strict=False)
+        self.assertEqual(
+            relaxed_workbook.active["A1"].value, "{price * quantity}"
         )
 
 

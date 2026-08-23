@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import math
+import operator
 import re
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -15,8 +18,13 @@ if TYPE_CHECKING:
     from .core.worksheet import Worksheet
     from .style import Style
 
-_PLACEHOLDER_PATTERN = re.compile(
-    r"\{((?:[\w-]+(?:\.(?:[\w-]+|@index))*)|\.)\}"
+_RAW_PLACEHOLDER_PATTERN = re.compile(r"\{([^{}\r\n]+)\}")
+_PATH_ROOT_TEXT = r"(?:[^\W\d]|_)[\w-]*"
+_PATH_TEXT = rf"{_PATH_ROOT_TEXT}(?:\.(?:[\w-]+|@index))*"
+_PLAIN_PATH_PATTERN = re.compile(rf"^(?:{_PATH_TEXT}|\.)$")
+_VARIABLE_PATTERN = re.compile(rf"(?<![\w.@]){_PATH_TEXT}(?![\w.@])")
+_FORMAT_FILTER_PATTERN = re.compile(
+    r'''^(.*?)\s*\|\s*format\s*:\s*(?:"([^"]*)"|'([^']*)')\s*$'''
 )
 _START_PATTERN = re.compile(r"^\{loop\s+([\w-]+(?:\.[\w-]+)*)\}$")
 _END_PATTERN = re.compile(r"^\{/loop\}$")
@@ -24,6 +32,20 @@ _CELL_REFERENCE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?!\d|\s*\()"
 )
 _MISSING = object()
+_MAX_EXPRESSION_LENGTH = 256
+_MAX_EXPRESSION_NODES = 64
+_BINARY_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+}
+_UNARY_OPERATORS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
 
 
 def _member(value: Any, name: str) -> Any:
@@ -86,6 +108,170 @@ def _resolve(
     return _path(context, expression)
 
 
+def _numeric(value: Any, expression: str) -> Any:
+    """功能：校验模板算术表达式的操作数和中间结果是否为受支持数值。
+
+    使用方法：安全表达式求值器在执行每个一元或二元运算前后调用。
+    参数：``value`` 为待校验对象；``expression`` 为用于错误信息的原始表达式。
+    返回：原 ``int`` 或有限 ``float`` 数值。
+    异常：布尔值、非数值对象或非有限浮点数抛出 :class:`TemplateError`。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TemplateError(f"模板表达式只支持整数和浮点数：{{{expression}}}")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise TemplateError(f"模板表达式不能产生无穷大或 NaN：{{{expression}}}")
+    return value
+
+
+def _evaluate_node(node: ast.AST, variables: Mapping[str, Any], expression: str) -> Any:
+    """功能：递归计算已经通过 Python AST 解析的安全数值节点。
+
+    使用方法：由 :func:`_calculate` 调用；不会执行函数、下标、属性或任意代码。
+    参数：``node`` 为当前 AST 节点；``variables`` 为内部变量和值的映射；
+    ``expression`` 为原始模板表达式。
+    返回：计算得到的 ``int`` 或有限 ``float``。
+    异常：节点、运算符或数据类型不在白名单中时抛出 :class:`TemplateError`。
+    """
+    if isinstance(node, ast.Expression):
+        return _evaluate_node(node.body, variables, expression)
+    if isinstance(node, ast.Constant):
+        return _numeric(node.value, expression)
+    if isinstance(node, ast.Name) and node.id in variables:
+        return _numeric(variables[node.id], expression)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPERATORS:
+        operand = _evaluate_node(node.operand, variables, expression)
+        return _numeric(_UNARY_OPERATORS[type(node.op)](operand), expression)
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPERATORS:
+        left = _evaluate_node(node.left, variables, expression)
+        right = _evaluate_node(node.right, variables, expression)
+        try:
+            result = _BINARY_OPERATORS[type(node.op)](left, right)
+        except ArithmeticError as error:
+            raise TemplateError(
+                f"模板表达式计算失败：{{{expression}}}；{error}"
+            ) from error
+        return _numeric(result, expression)
+    raise TemplateError(
+        "模板表达式只允许数值、数据路径、括号以及 +、-、*、/、//、% 运算"
+        f"：{{{expression}}}"
+    )
+
+
+def _calculate(
+    expression: str,
+    context: Mapping[str, Any],
+    item: Any,
+    item_index: Optional[int],
+    loop_name: Optional[str],
+) -> Any:
+    """功能：把数据路径替换为内部变量并安全计算数值表达式。
+
+    使用方法：处理 ``items.@index + 1`` 或 ``quantity * price`` 等标签时调用。
+    参数：``expression`` 为不含格式过滤器的表达式；``context`` 为根数据；
+    ``item``、``item_index`` 和 ``loop_name`` 描述当前循环作用域。
+    返回：计算结果；任一数据路径缺失时返回内部缺失标记。
+    异常：表达式过长、过于复杂、语法无效或包含非白名单能力时抛出
+    :class:`TemplateError`。
+    """
+    if len(expression) > _MAX_EXPRESSION_LENGTH:
+        raise TemplateError(
+            f"模板表达式长度不能超过 {_MAX_EXPRESSION_LENGTH} 个字符"
+        )
+    variables: Dict[str, Any] = {}
+    missing = False
+
+    def replace(match: re.Match[str]) -> str:
+        """功能：把一个模板数据路径替换成无副作用的内部 AST 变量名。
+
+        使用方法：由变量路径正则替换过程自动调用。
+        参数：``match`` 为一个根路径或循环元素路径匹配。
+        返回：形如 ``_value_0`` 的内部变量名。
+        """
+        nonlocal missing
+        path_expression = match.group(0)
+        resolved = _resolve(
+            path_expression, context, item, item_index, loop_name
+        )
+        variable_name = f"_value_{len(variables)}"
+        variables[variable_name] = resolved
+        if resolved is _MISSING:
+            missing = True
+        return variable_name
+
+    translated = _VARIABLE_PATTERN.sub(replace, expression)
+    if missing:
+        return _MISSING
+    if not variables:
+        raise TemplateError(f"模板计算表达式必须包含数据路径：{{{expression}}}")
+    try:
+        tree = ast.parse(translated, mode="eval")
+    except SyntaxError as error:
+        raise TemplateError(f"无效的模板计算表达式：{{{expression}}}") from error
+    if sum(1 for _node in ast.walk(tree)) > _MAX_EXPRESSION_NODES:
+        raise TemplateError(
+            f"模板表达式不能超过 {_MAX_EXPRESSION_NODES} 个语法节点"
+        )
+    return _evaluate_node(tree, variables, expression)
+
+
+def _evaluate_expression(
+    expression: str,
+    context: Mapping[str, Any],
+    item: Any = _MISSING,
+    item_index: Optional[int] = None,
+    loop_name: Optional[str] = None,
+) -> Any:
+    """功能：统一解析普通路径、数值计算和 ``format`` 显示格式过滤器。
+
+    使用方法：每次替换 ``{...}`` 模板标签时调用。
+    参数：``expression`` 为标签内部文本；``context`` 为根数据；``item``、
+    ``item_index`` 和 ``loop_name`` 为可选循环作用域。
+    返回：原始路径值、数值计算结果或格式化后的字符串；路径缺失时返回内部标记。
+    异常：过滤器、格式字符串或算术表达式无效时抛出 :class:`TemplateError`。
+    """
+    expression = expression.strip()
+    format_spec: Optional[str] = None
+    filter_match = _FORMAT_FILTER_PATTERN.fullmatch(expression)
+    if filter_match is not None:
+        expression = filter_match.group(1).strip()
+        format_spec = (
+            filter_match.group(2)
+            if filter_match.group(2) is not None
+            else filter_match.group(3)
+        )
+    elif "|" in expression:
+        raise TemplateError(
+            "模板只支持一个格式过滤器，写法为 | format:\"格式字符串\""
+        )
+
+    if _PLAIN_PATH_PATTERN.fullmatch(expression):
+        result = _resolve(expression, context, item, item_index, loop_name)
+    else:
+        result = _calculate(expression, context, item, item_index, loop_name)
+    if result is _MISSING or format_spec is None:
+        return result
+    try:
+        return format(result, format_spec)
+    except (TypeError, ValueError) as error:
+        raise TemplateError(
+            f"模板格式字符串无效：{{{expression} | format:\"{format_spec}\"}}"
+        ) from error
+
+
+def _placeholder_matches(value: str) -> List[re.Match[str]]:
+    """功能：找出包含数据路径的模板标签并忽略普通 Excel 花括号内容。
+
+    使用方法：渲染字符串前调用，避免把 Excel 数组常量 ``{1,2}`` 当作模板。
+    参数：``value`` 为可能含有一个或多个标签的字符串。
+    返回：按原字符串位置排列的正则匹配列表。
+    """
+    return [
+        match for match in _RAW_PLACEHOLDER_PATTERN.finditer(value)
+        if match.group(1).strip() == "."
+        or _VARIABLE_PATTERN.search(match.group(1)) is not None
+    ]
+
+
 def _render_text(
     value: str,
     context: Mapping[str, Any],
@@ -102,12 +288,14 @@ def _render_text(
     返回：整格只有一个标签时返回原类型值；混合文本返回替换后的字符串。
     异常：严格模式遇到缺失标签时抛出 :class:`TemplateError`。
     """
-    matches = list(_PLACEHOLDER_PATTERN.finditer(value))
+    matches = _placeholder_matches(value)
     if not matches:
         return value
     if len(matches) == 1 and matches[0].span() == (0, len(value)):
-        expression = matches[0].group(1)
-        result = _resolve(expression, context, item, item_index, loop_name)
+        expression = matches[0].group(1).strip()
+        result = _evaluate_expression(
+            expression, context, item, item_index, loop_name
+        )
         if result is _MISSING:
             if strict:
                 raise TemplateError(f"模板数据缺少标签：{{{expression}}}")
@@ -118,8 +306,10 @@ def _render_text(
     position = 0
     for match in matches:
         parts.append(value[position:match.start()])
-        expression = match.group(1)
-        result = _resolve(expression, context, item, item_index, loop_name)
+        expression = match.group(1).strip()
+        result = _evaluate_expression(
+            expression, context, item, item_index, loop_name
+        )
         if result is _MISSING:
             if strict:
                 raise TemplateError(f"模板数据缺少标签：{{{expression}}}")

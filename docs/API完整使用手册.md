@@ -1,6 +1,6 @@
-# ExcelKit 0.1.2 完整中文使用与 API 手册
+# ExcelKit 0.2.0 完整中文使用与 API 手册
 
-版本：0.1.2  
+版本：0.2.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,14 +8,16 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.1.2-py3-none-any.whl
+pip install excelkit-0.2.0-py3-none-any.whl
 ```
 
 稳定核心对象从顶层导入：
 
 ```python
 from excelkit import (
-    Workbook, Worksheet, Cell, Range,
+    Workbook, Worksheet, Cell, CellValue, Range,
+    RowDimension, ColumnDimension,
+    PageSettings, PageMargins, HeaderFooter,
     Style, Font, Fill, Side, Border, Alignment,
     __version__,
 )
@@ -64,7 +66,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.1.2"
+assert excelkit.__version__ == "0.2.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -127,6 +129,77 @@ summary = workbook.add_sheet("统计")
 assert workbook.sheet("成绩") is scores
 assert workbook.sheet(0) is scores
 assert workbook.sheet(-1) is summary
+```
+
+### `Workbook.remove_sheet(name_or_index)`
+
+功能：按名称或 0-based 索引删除一张工作表。删除后其余工作表保持原有相对顺序；
+如果删除的是最后一张工作表，工作簿会变为空，下一次访问 `active` 时再创建
+`Sheet1`。
+
+参数：
+
+- `name_or_index: str | int`：字符串按标签名称查找；整数按当前顺序查找，允许
+  Python 负索引。布尔值不作为整数。
+
+返回：当前 `Workbook`，可继续链式调用。
+
+异常：名称不存在时抛出 `KeyError`；索引越界时抛出 `IndexError`；类型不正确时
+抛出 `TypeError`。查找失败不会修改工作簿。
+
+```python
+workbook.remove_sheet("统计")
+workbook.remove_sheet(0).save("删除后.xlsx")
+```
+
+### `Workbook.move_sheet(name_or_index, index)`
+
+功能：把已有工作表移动到指定的最终位置。索引表示移动完成后的 0-based 位置，
+不采用插入前位置，因此调用者不需要自行修正向后移动时的偏移量。
+
+参数：
+
+- `name_or_index: str | int`：要移动的工作表名称或当前索引，查询规则与
+  `sheet()` 相同。
+- `index: int`：移动完成后的非负 0-based 索引，范围为 `0` 到
+  `len(workbook) - 1`；这里不接受负索引和布尔值。
+
+返回：当前 `Workbook`。
+
+异常：目标位置无效时抛出 `IndexError` 或 `TypeError`；工作表查询异常与
+`sheet()` 相同。失败时顺序保持不变。
+
+```python
+workbook = Workbook()
+workbook.add_sheet("一")
+workbook.add_sheet("二")
+workbook.add_sheet("三")
+workbook.move_sheet("三", 0)
+assert tuple(sheet.label for sheet in workbook.sheets) == ("三", "一", "二")
+```
+
+### `Workbook.copy_sheet(name_or_index, new_name)`
+
+功能：复制一张工作表，并将副本追加到工作簿末尾。普通值、公式、不可变单元格
+样式、标签颜色、行列尺寸、合并区域、冻结窗格、筛选、网格线以及全部页面设置
+都会复制；副本之后可以独立修改，不会反向影响源表。
+
+参数：
+
+- `name_or_index: str | int`：源工作表名称或索引。
+- `new_name: str`：副本名称，使用与 `add_sheet()` 完全相同的校验和大小写不敏感
+  去重规则。
+
+返回：新创建的 `Worksheet`。
+
+异常：源表查询异常与 `sheet()` 相同；新名称无效时抛出
+`InvalidWorksheetNameError`，重复时抛出 `ValueError`。失败时不会留下半成品副本。
+
+```python
+source = workbook.sheet("月报")
+copy = workbook.copy_sheet(source.label, "月报副本")
+copy["A1"] = "仅修改副本"
+assert source["A1"].value != copy["A1"].value
 ```
 
 ### `Workbook.sheets`
@@ -193,7 +266,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.1.2 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.2.0 也不提供宏对象模型。
 
 ### `Workbook.render(data, *, strict=True)`
 
@@ -272,6 +345,46 @@ result = (
 - 空集合会删除开始行、模板内容和结束行，不留下空白模板行。
 - 当前版本不允许循环嵌套；同一工作表可以按顺序放置多个互不重叠的循环块。
 - 循环标记行可带样式，但不能包含其他普通值或公式。
+
+#### 模板数值表达式
+
+标签中可以直接进行受限数值计算。表达式支持整数、有限浮点数、数据路径、圆括号、
+一元正负号和 `+`、`-`、`*`、`/`、`//`、`%`；不执行 Python 函数、属性方法、
+下标表达式、比较、逻辑运算或任意代码。
+
+```text
+{items.@index + 1}
+{items.quantity * items.price}
+{(items.price - items.discount) * items.quantity}
+{items.total / 100}
+```
+
+把第一条数据的显示序号从 0 改为 1，直接使用：
+
+```text
+{items.@index + 1}
+```
+
+表达式中的所有运算数都必须是数值，布尔值不作为整数参与计算。除数为零、非数值
+字段、过长或过于复杂的表达式都会抛出 `TemplateError`。`strict=False` 时，缺少
+字段的表达式原样保留；已经找到字段但计算本身无效仍会报错。
+
+#### 模板显示格式
+
+表达式末尾可追加唯一的 `format` 过滤器，格式字符串遵循 Python 内置
+`format(value, spec)` 的格式规范：
+
+```text
+{items.price | format:",.2f"}
+{items.quantity * items.price | format:",.2f"}
+{items.ratio | format:".1%"}
+{items.code | format:"04d"}
+```
+
+参数说明：`format:` 后面的内容必须使用成对单引号或双引号包围；格式无效时抛出
+`TemplateError`。使用过滤器后结果一定是显示字符串。如果需要真正的 Excel 数值
+以便继续参与公式计算，应让整格只写数值表达式，并通过 `Cell.style.number_format`
+控制 Excel 显示格式。
 
 #### 样式和公式
 
@@ -466,6 +579,119 @@ for row in range(10):
 area = worksheet.range("A1:C10")
 ```
 
+### `Worksheet.row(index)`
+
+功能：取得指定行的持久化尺寸对象，用于设置行高和隐藏状态。重复传入同一索引会
+返回同一个 `RowDimension` 对象。
+
+参数：`index: int`，0-based 行索引，范围为 0～1048575；布尔值无效。
+
+返回：`RowDimension`。仅取得对象不会扩大 `max_row`，实际设置行尺寸也不创建
+普通值单元格。
+
+异常：索引类型或范围无效时抛出 `InvalidAddressError`。
+
+```python
+row = worksheet.row(0)
+row.height = 28       # 磅
+row.hidden = False
+```
+
+### `Worksheet.column(index)`
+
+功能：取得指定列的持久化尺寸对象，用于设置 Excel 列宽和隐藏状态。
+
+参数：`index: int`，0-based 列索引，范围为 0～16383；布尔值无效。
+
+返回：`ColumnDimension`。重复访问同一索引返回同一个对象。
+
+异常：索引类型或范围无效时抛出 `InvalidAddressError`。
+
+```python
+column = worksheet.column(1)
+column.width = 24
+column.hidden = False
+```
+
+### `Worksheet.merged_ranges`
+
+功能：取得当前工作表全部合并区域的只读快照，顺序按左上角位置排列。
+
+参数：无，只读属性。
+
+返回：`tuple[Range, ...]`；没有合并时返回空 tuple。返回的 `Range` 可读取
+`address`，也可调用 `unmerge()`。
+
+```python
+worksheet.range("A1:F1").merge()
+assert tuple(area.address for area in worksheet.merged_ranges) == ("A1:F1",)
+```
+
+### `Worksheet.freeze`
+
+功能：读取、设置或清除冻结窗格。地址表示冻结后左上角第一个仍可滚动的单元格；
+因此 `"A3"` 冻结前两行，`"C1"` 冻结前两列，`"C3"` 同时冻结前两行两列。
+
+参数：设置值为单个 A1 地址或 `None`。`"A1"` 等价于 `None`，因为其上方和
+左侧都没有可冻结内容。
+
+返回：读取时返回规范化 A1 地址或 `None`；设置时返回 `None`。
+
+异常：地址无效时抛出 `InvalidAddressError`；非字符串且非 `None` 时抛出
+`TypeError`。
+
+```python
+worksheet.freeze = "A3"
+assert worksheet.freeze == "A3"
+worksheet.freeze = None
+```
+
+### `Worksheet.filter_range`
+
+功能：设置连续矩形区域的自动筛选按钮，或读取、清除现有筛选区域。它只定义
+筛选范围，不在 Python 内存中隐藏不符合条件的数据行。
+
+参数：设置值为 A1 区域字符串（例如 `"A1:F100"`）或 `None`。
+
+返回：读取时返回规范化区域地址或 `None`；设置时返回 `None`。
+
+异常：单格地址、反向区域或越界地址抛出 `InvalidAddressError`。
+
+```python
+worksheet.filter_range = "A2:F100"
+worksheet.filter_range = None
+```
+
+### `Worksheet.show_gridlines`
+
+功能：控制工作表在 Excel/WPS 窗口中的屏幕网格线。它与打印网格线
+`worksheet.page.print_gridlines` 是两个互不影响的设置。
+
+参数：设置值必须是 `bool`。
+
+返回：读取时返回 `bool`，默认 `True`；设置时返回 `None`。
+
+异常：非布尔值抛出 `TypeError`。
+
+```python
+worksheet.show_gridlines = False
+worksheet.page.print_gridlines = True
+```
+
+### `Worksheet.page`
+
+功能：返回该工作表唯一的页面布局与打印设置对象。属性本身只读；其内部字段可
+修改，详见“页面布局与打印 API”。
+
+参数：无，只读属性。
+
+返回：`PageSettings`；每次访问同一工作表都返回同一个对象。
+
+```python
+worksheet.page.orientation = "landscape"
+worksheet.page.fit(width=1)
+```
+
 ### `Worksheet.max_row`
 
 功能：返回已经触及的最大 0-based 行索引。清除值不会缩小历史最大索引。
@@ -552,6 +778,45 @@ assert worksheet.values == [
 ]
 ```
 
+### `RowDimension.index` / `height` / `hidden`
+
+功能：`index` 返回所属行的只读 0-based 索引；`height` 读取或设置行高（单位为
+磅），`None` 恢复应用程序默认行高；`hidden` 控制是否隐藏整行。
+
+参数：`height` 接受大于 0 且不超过 409 的有限 `int | float` 或 `None`；
+`hidden` 必须是 `bool`。
+
+返回：`index` 为 `int`，`height` 为 `float | None`，`hidden` 为 `bool`；属性设置
+返回 `None`。
+
+异常：尺寸不是有效有限数或超出范围时抛出 `ValueError`；类型错误抛出
+`TypeError`。
+
+```python
+row = worksheet.row(2)
+assert row.index == 2
+row.height = 30
+row.hidden = True
+row.height = None
+```
+
+### `ColumnDimension.index` / `width` / `hidden`
+
+功能：`index` 返回只读 0-based 列索引；`width` 使用 Excel 字符宽度单位设置列宽，
+`None` 恢复默认列宽；`hidden` 控制是否隐藏整列。
+
+参数：`width` 接受大于 0 且不超过 255 的有限 `int | float` 或 `None`；
+`hidden` 必须是 `bool`。
+
+返回和异常：与 `RowDimension` 对应属性相同。
+
+```python
+column = worksheet.column(1)
+assert column.index == 1
+column.width = 24
+column.hidden = True
+```
+
 ## 6. Cell 单元格
 
 ### `Cell.row`
@@ -623,6 +888,91 @@ assert worksheet["A3"].value == datetime(2026, 8, 1, 12, 33)
 
 日期部分可用 `-` 或 `/`，同一个字面量中的分隔符必须一致；时间支持小时、分钟及
 可选秒。非法公历日期或时间抛出 `ValueError`，并且不会清除原值或公式。
+
+### `Cell.set_value(value)`
+
+功能：写入普通值并返回当前 `Cell`，是需要立即调用写回型 `as_*()` 时的链式入口。
+它与 `cell.value = value` 使用同一套写入和日期字面量识别规则；写入会清除公式。
+
+参数：`value: Any`，任意普通 Python 值。
+
+返回：当前 `Cell`。
+
+异常：日期字面量非法时抛出 `ValueError`；合并区域非左上角单元格禁止写入时抛出
+`ValueError`。写入失败不会改变原值。
+
+```python
+result = worksheet["A1"].set_value("2026-8-1").as_date()
+assert result == date(2026, 8, 1)
+assert worksheet["A1"].value == result
+```
+
+### `Cell.as_string()` / `as_int()` / `as_float()` / `as_bool()` / `as_date()` / `as_datetime()`
+
+功能：把当前普通值转换成指定类型，**把转换结果写回同一单元格**，然后直接返回
+目标类型的结果。写回意味着结果会出现在之后保存的 XLS/XLSX 文件中。
+
+参数：六个方法均无参数。
+
+返回：依次为 `str`、`int`、`float`、`bool`、`datetime.date` 或
+`datetime.datetime`。
+
+转换规则：
+
+| 方法 | 接受的常用输入 | 关键限制 |
+|---|---|---|
+| `as_string()` | 任意值 | `None` 明确转换为空字符串 |
+| `as_int()` | 整数、整数值浮点数、整数字符串 | 不接受布尔值；不截断 `1.2`，拒绝 NaN/无穷大 |
+| `as_float()` | 有限整数、浮点数或数字字符串 | 不接受布尔值；结果必须有限 |
+| `as_bool()` | 布尔值、0/1、`true/false`、`yes/no`、`是/否` | 其他数字和文本无效，忽略文本首尾空格和大小写 |
+| `as_date()` | `date`、`datetime`、`YYYY-M-D` 或 `YYYY/M/D` 文本 | `datetime` 只取日期部分 |
+| `as_datetime()` | `datetime`、`date`、日期或日期时间文本 | `date` 转换为当天 00:00:00 |
+
+日期转换文本既可以带 `#`，也可以不带；日期时间支持 `HH:MM` 和 `HH:MM:SS`。
+转换失败抛出 `TypeError` 或 `ValueError`，原单元格保持不变。
+
+```python
+worksheet["A1"].set_value("123").as_int()
+worksheet["A2"].set_value("是").as_bool()
+worksheet["A3"].set_value("2026/8/1 12:33").as_datetime()
+```
+
+### `Cell.read()`
+
+功能：读取当前普通值并创建一个独立的 `CellValue` 快照。快照随后可使用同名
+`as_*()` 转换，但不会写回工作表。
+
+参数：无。
+
+返回：`CellValue`。创建后即使原单元格改变，快照仍保留读取时的值。
+
+```python
+worksheet["A1"].value = "123"
+snapshot = worksheet["A1"].read()
+worksheet["A1"].value = "456"
+assert snapshot.as_int() == 123
+```
+
+### `CellValue.as_string()` / `as_int()` / `as_float()` / `as_bool()` / `as_date()` / `as_datetime()`
+
+功能：按照与 `Cell.as_*()` 完全相同的严格规则转换只读快照，只返回临时结果，
+**绝不修改工作簿**。
+
+参数：六个方法均无参数。
+
+返回和异常：与对应 `Cell.as_*()` 完全相同。
+
+```python
+worksheet["A1"].value = "123"
+temporary = worksheet["A1"].read().as_int()
+assert temporary == 123
+assert worksheet["A1"].value == "123"
+```
+
+<p style="color:#C00000"><strong>🔴 重要区别：cell.as_*() 会把转换结果写回单元格并影响保存文件；cell.read().as_*() 只转换读取快照，绝不会改变 Excel 文件。需要写回时使用 set_value(...).as_*()，只为当前 Python 代码临时取值时使用 read().as_*()。</strong></p>
+
+API 只保留语义明确的 `as_string()`，不提供 `as_str()`；也不提供与 `value` 属性
+冲突的 `value()` 方法。
 
 ### `Cell.formula`
 
@@ -746,6 +1096,18 @@ assert (area.min_row, area.min_column) == (2, 1)
 assert (area.max_row, area.max_column) == (7, 3)
 ```
 
+### `Range.address`
+
+功能：返回由四个边界组成的规范化大写 A1 区域地址。
+
+参数：无，只读属性。
+
+返回：`str`，例如 `"B3:D8"`。
+
+```python
+assert worksheet.range("b3:d8").address == "B3:D8"
+```
+
 ### `Range.values`
 
 功能：以二维 list 读取矩形区域的普通值。
@@ -780,7 +1142,293 @@ result = area.set_values([
 assert result is area
 ```
 
-## 9. address 地址工具
+### `Range.merge()`
+
+功能：合并当前矩形区域。合并后只允许左上角锚点保存普通值或公式；为防止数据
+丢失，合并前区域内除左上角外必须没有普通值或公式。各位置样式保持不变。对同一
+地址重复调用是幂等的。
+
+参数：无。
+
+返回：当前 `Range`，支持链式调用。
+
+异常：与已有合并区域重叠但地址不完全相同时抛出 `ValueError`，原结构保持不变。
+
+```python
+title = worksheet.range("A1:F1").merge()
+worksheet["A1"] = "销售报表"
+assert title.address == "A1:F1"
+```
+
+### `Range.unmerge()`
+
+功能：取消与当前地址完全相同的合并区域。取消后原锚点值仍在左上角，其余格保持
+空白。
+
+参数：无。
+
+返回：当前 `Range`。当前地址不是一个完整合并区域时抛出 `ValueError`。
+
+```python
+worksheet.range("A1:F1").unmerge()
+```
+
+## 9. 页面布局与打印 API
+
+页面设置从 `worksheet.page` 进入，不另外创建或替换 `PageSettings`。默认值为 A4、
+纵向、100% 缩放、常用厘米边距，不打印网格线和标题。
+
+### `PageSettings.orientation`
+
+功能：读取或设置打印方向。
+
+参数：设置值为 `"portrait"`（纵向）或 `"landscape"`（横向）。
+
+返回：读取时为 `str`；设置时为 `None`。无效枚举值抛出 `ValueError`。
+
+```python
+worksheet.page.orientation = "landscape"
+```
+
+### `PageSettings.paper_size`
+
+功能：读取或设置常用纸张规格。
+
+参数：`"A3"`、`"A4"`、`"A5"`、`"Letter"` 或 `"Legal"`，输入不区分
+大小写，读取时返回表中规范写法。
+
+返回：读取时为 `str`；设置时为 `None`。不支持的规格抛出 `ValueError`。
+
+```python
+worksheet.page.paper_size = "A4"
+```
+
+### `PageSettings.scale`
+
+功能：读取或设置打印缩放百分比。设置具体百分比会自动清除先前的适应页数设置，
+避免两套互斥配置同时生效。
+
+参数：10～400 的整数或 `None`；布尔值无效。
+
+返回：读取时为 `int | None`；设置时为 `None`。范围无效抛出 `ValueError`。
+
+```python
+worksheet.page.scale = 90
+```
+
+### `PageSettings.fit(width=1, height=None)`
+
+功能：一次设置“将内容缩放到几页宽、几页高”。它代替两个容易漏配的
+`fit_width`、`fit_height` 属性；调用后自动把 `scale` 设为 `None`。
+
+参数：
+
+- `width: int | None = 1`：横向页数，默认 1；`None` 表示宽度不限。
+- `height: int | None = None`：纵向页数；`None` 表示高度不限。
+- 两者至少一项非 `None`，具体值必须是正整数，布尔值无效。
+
+返回：当前 `PageSettings`，支持链式使用。参数无效抛出 `ValueError`。
+
+```python
+page = worksheet.page
+page.fit()                    # 等价于 fit(width=1, height=None)：一页宽，高度不限
+page.fit(width=1, height=1)  # 整张打印区域适应一页
+page.fit(width=None, height=2)  # 高度两页，宽度不限
+```
+
+`fit()` 最常用的“一页宽”场景只需一次调用，不需要同时写两个属性。若随后执行
+`page.scale = 90`，适应页数模式会被清除。
+
+### `PageSettings.first_page_number`
+
+功能：设置打印时显示的起始页码；`None` 让 Excel 自动从 1 开始。
+
+参数：正整数或 `None`。返回：`int | None`。非正整数抛出 `ValueError`。
+
+```python
+worksheet.page.first_page_number = 5
+```
+
+### `PageSettings.black_and_white` / `draft`
+
+功能：分别控制黑白打印和草稿质量打印。
+
+参数：两个属性都只接受 `bool`。返回：读取时为 `bool`，默认 `False`。
+
+```python
+worksheet.page.black_and_white = True
+worksheet.page.draft = False
+```
+
+### `PageSettings.order`
+
+功能：当打印区域横向和纵向都跨页时，指定页面编号和打印顺序。
+
+参数：`"down_then_over"` 表示先向下再向右；`"over_then_down"` 表示先向右
+再向下。返回：规范字符串。无效值抛出 `ValueError`。
+
+```python
+worksheet.page.order = "down_then_over"
+```
+
+### `PageMargins(left, right, top, bottom, header, footer)`
+
+功能：创建不可变打印边距值对象。ExcelKit 的公开单位统一为厘米，写出 XLSX 时
+自动换算为文件格式要求的英寸。
+
+参数：六个字段均为有限的非负 `int | float`，默认依次为 1.78、1.78、1.91、
+1.91、0.76、0.76 厘米。布尔值、负数、NaN 和无穷大无效。
+
+返回：不可变 `PageMargins`。错误类型或范围抛出 `TypeError` 或 `ValueError`。
+
+```python
+from excelkit import PageMargins
+
+worksheet.page.margins = PageMargins(
+    left=1.5, right=1.5, top=2.0, bottom=2.0,
+    header=0.8, footer=0.8,
+)
+```
+
+`PageSettings.margins` 只接受完整的 `PageMargins`，这样六项设置作为一个不可变值
+整体替换，不会出现部分更新失败。
+
+### `PageSettings.area`
+
+功能：读取、设置或清除打印区域。
+
+参数：标准 A1 矩形区域字符串或 `None`。返回：规范化大写地址或 `None`。
+无效区域抛出 `InvalidAddressError`。
+
+```python
+worksheet.page.area = "A1:F100"
+worksheet.page.area = None
+```
+
+### `PageSettings.repeat_rows` / `repeat_columns`
+
+功能：设置每一打印页顶部重复的标题行，或每页左侧重复的标题列。
+
+参数：包含式起止索引二元组 `(start, end)` 或 `None`，所有索引均为 0-based；
+`repeat_rows` 校验行范围，`repeat_columns` 校验列范围，且起点不得大于终点。
+
+返回：对应 tuple 或 `None`。结构、类型、范围或顺序无效时抛出 `TypeError`、
+`InvalidAddressError` 或 `ValueError`。
+
+```python
+worksheet.page.repeat_rows = (0, 1)     # 每页重复第 1～2 行
+worksheet.page.repeat_columns = (0, 0)  # 每页重复 A 列
+```
+
+### `PageSettings.center_horizontal` / `center_vertical`
+
+功能：控制打印内容是否在纸张的水平或垂直方向居中。
+
+参数：只接受 `bool`。返回：读取时为 `bool`，默认 `False`。
+
+### `PageSettings.print_gridlines` / `print_headings`
+
+功能：分别控制是否打印单元格网格线，以及是否打印 A/B/C 列标和 1/2/3 行号。
+这两个设置不改变屏幕显示。
+
+参数：只接受 `bool`。返回：读取时为 `bool`，默认 `False`。
+
+```python
+worksheet.page.print_gridlines = True
+worksheet.page.print_headings = True
+```
+
+### `HeaderFooter(left="", center="", right="")`
+
+功能：创建不可变的页眉或页脚三区域值对象。ExcelKit 在序列化时自动加入
+`&L`、`&C`、`&R` 区域标记，调用者只在 `left`、`center`、`right` 中填写要显示
+的文本和动态控制符。
+
+参数：三个字段都必须是 `str`，默认空字符串。返回：不可变 `HeaderFooter`；
+类型错误抛出 `TypeError`。
+
+```python
+from excelkit import HeaderFooter
+
+page = worksheet.page
+page.header = HeaderFooter(
+    left="ExcelKit",
+    center="销售报表",
+    right="&D &T",
+)
+page.footer = HeaderFooter(
+    left="&F",
+    center="第 &P 页，共 &N 页",
+    right="&A",
+)
+```
+
+`PageSettings.header` 和 `footer` 只接受 `HeaderFooter`；传入空对象
+`HeaderFooter()` 可清空对应内容。
+
+#### 页眉/页脚全部特殊控制符
+
+下表按 Microsoft Excel 公布的页眉/页脚代码完整列出。ExcelKit 会把这些文本代码
+写入 XLSX/XLS，由打开文件的 Excel、WPS 等应用在打印或预览时解释；显示细节可能
+随应用而异。
+
+| 控制符 | 功能 | 示例 | ExcelKit 0.2.0 |
+|---|---|---|---|
+| `&L` | 后续内容进入左侧区域 | `&L公司` | 自动生成；通常不要手写 |
+| `&C` | 后续内容进入中间区域 | `&C月报` | 自动生成；通常不要手写 |
+| `&R` | 后续内容进入右侧区域 | `&R&D` | 自动生成；通常不要手写 |
+| `&P` | 当前页码 | `第 &P 页` | 支持 |
+| `&P+数字` | 当前页码加指定数 | `&P+1` | 支持，由表格应用解释 |
+| `&P-数字` | 当前页码减指定数 | `&P-1` | 支持，由表格应用解释 |
+| `&N` | 当前文档总页数 | `共 &N 页` | 支持 |
+| `&D` | 打印时的当前日期 | `打印日期：&D` | 支持 |
+| `&T` | 打印时的当前时间 | `打印时间：&T` | 支持 |
+| `&F` | 工作簿文件名 | `文件：&F` | 支持 |
+| `&A` | 当前工作表标签名称 | `工作表：&A` | 支持 |
+| `&Z` | 工作簿文件路径 | `路径：&Z` | 支持 |
+| `&&` | 显示一个普通 `&` 字符 | `研发 && 销售` | 支持 |
+| `&B` | 开启/关闭粗体；再次出现即关闭 | `&B重要&B` | 支持 |
+| `&I` | 开启/关闭斜体 | `&I斜体&I` | 支持 |
+| `&U` | 开启/关闭单下划线 | `&U下划线&U` | 支持 |
+| `&E` | 开启/关闭双下划线 | `&E双下划线&E` | 支持 |
+| `&S` | 开启/关闭删除线 | `&S作废&S` | 支持 |
+| `&X` | 开启/关闭上标 | `m&X2&X` | 支持 |
+| `&Y` | 开启/关闭下标 | `H&Y2&YO` | 支持 |
+| `&"字体名,字形"` | 设置后续字体及字形 | `&"微软雅黑,Bold"标题` | 支持，具体字体需系统存在 |
+| `&nn` | 设置后续字号，常用两位磅值 | `&14标题` | 支持 |
+| `&Krrggbb` / `&color` | 使用六位十六进制文字颜色 | `&KFF0000红色` | XLSX 支持；旧版 XLS/应用兼容性有限 |
+| `&"+"` | 使用当前主题的标题字体 | `&"+"标题` | 支持，由表格应用解释 |
+| `&"-"` | 使用当前主题的正文字体 | `&"-"正文` | 支持，由表格应用解释 |
+| `&Kxx.Snnn` | 使用主题颜色；`xx` 为 01～12，`S` 为 `+`/`-`，`nnn` 为 000～100 的明暗百分比 | `&K04.+050文字` | XLSX 支持；由表格应用解释 |
+| `&G` | 插入页眉/页脚图片 | `&G` | **暂不支持**；0.2.0 不创建图片关系和媒体文件 |
+
+格式开关是切换式的。例如 `&B重要&B普通` 只让“重要”变粗。要显示普通 `&`，必须
+写成 `&&`。`HeaderFooter` 的 `left`、`center`、`right` 已经代表三个区域，所以
+不要在字段内容中再嵌套 `&L`、`&C` 或 `&R`。
+
+控制符含义依据 Microsoft 官方
+[Excel 页眉页脚格式与 VBA 代码](https://learn.microsoft.com/en-us/office/vba/excel/concepts/workbooks-and-worksheets/formatting-and-vba-codes-for-headers-and-footers)
+及 [MS-XLS Header 记录规范](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/b64cf6b8-9472-4f97-9a69-d839f0fa1089)。
+
+最常见的完整页脚：
+
+```python
+page.footer = HeaderFooter(
+    left="ExcelKit",
+    center="第 &P 页，共 &N 页",
+    right="&D",
+)
+```
+
+### 页面设置格式兼容性
+
+XLSX 可保存并重新读取本节全部非图片设置。XLS 写出支持方向、纸张、缩放/适应
+页数、页序、黑白/草稿、居中、网格线/标题、边距、页眉页脚、行列尺寸、合并和冻结；
+受 `xlwt` 接口限制，XLS 暂不写出打印区域、重复标题和自定义起始页码。`xlrd`
+不会公开 XLS 页面设置，因此从 XLS 加载时这些打印属性不能恢复。`&G` 图片在两种
+格式中均暂不支持。
+
+## 10. address 地址工具
 
 ### `MAX_ROW` / `MAX_COLUMN`
 
@@ -858,7 +1506,7 @@ assert parse_range("B3:D8") == (2, 1, 7, 3)
 assert cell_address(7, 2) == "C8"
 ```
 
-## 10. errors 异常
+## 11. errors 异常
 
 ### `ExcelKitError`
 
@@ -904,7 +1552,7 @@ except ExcelKitError as error:
     print("其他 ExcelKit 错误", error)
 ```
 
-## 11. XlsxWriter 高级写出 API
+## 12. XlsxWriter 高级写出 API
 
 模块：`excelkit.writer.xlsx`。业务代码优先使用 `Workbook.save()`。
 
@@ -1042,7 +1690,7 @@ from excelkit.writer.xls import XlsWriter
 XlsWriter(workbook).write("兼容旧版.xls")
 ```
 
-## 12. ValueStore 内部 API
+## 13. ValueStore 内部 API
 
 模块：`excelkit.storage`。它不是稳定业务 API。
 
@@ -1087,7 +1735,7 @@ assert store.get(0, 0) == "A1"
 assert list(store.items()) == [((0, 0), "A1")]
 ```
 
-## 13. 普通值写出规则
+## 14. 普通值写出规则
 
 | Python 值 | XLSX 表示 |
 |---|---|
@@ -1102,7 +1750,7 @@ assert list(store.items()) == [((0, 0), "A1")]
 公式单元格写入 `<f>`，不包含 Python 端计算结果。打开文件后由 Excel、WPS 或其他
 兼容软件计算公式。
 
-## 14. 可运行示例文件
+## 15. 可运行示例文件
 
 项目 `examples/` 目录提供：
 
@@ -1118,6 +1766,8 @@ assert list(store.items()) == [((0, 0), "A1")]
 - `10_load_and_xls.py`：`Workbook.load()` 及 XLS/XLSX 读写。
 - `11_template.py`：创建模板并演示标量标签与循环行块渲染。
 - `12_worksheet_properties.py`：工作表重命名和标签颜色。
+- `13_layout_and_print.py`：工作表管理、合并、尺寸、视图与完整打印设置，同时生成
+  XLSX 和 XLS 示例文件。
 - `create_excel.py`：组合示例。
 
 在项目根目录执行，例如：
@@ -1126,9 +1776,51 @@ assert list(store.items()) == [((0, 0), "A1")]
 python -m examples.02_cell_formula
 ```
 
-## 15. 0.1.2 能力边界
+## 16. 0.2.0 能力边界
 
-0.1.2 不提供模板循环嵌套、完整公式语法重写、公式计算、XLS 公式表达式恢复、
-行高、列宽、合并单元格、冻结窗格、
-图片、图表、条件格式、数据验证、Table、筛选、打印设置、宏对象模型或流式大文件
-处理。XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。
+0.2.0 不提供模板循环嵌套、完整公式语法重写、Python 端公式计算、XLS 公式表达式
+恢复、页眉页脚图片、普通图片、图表、条件格式、数据验证、Table、筛选条件执行、
+宏对象模型或流式大文件处理。
+
+模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.2.0
+API 显式设置。
+
+XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
+65536 行、256 列、56 色调色板和第三方后端能力限制；页面设置兼容性详见本手册
+“页面设置格式兼容性”。
+
+## 17. API 选择指南
+
+| 场景 | 推荐 API | 原因 |
+|---|---|---|
+| 固定 A1 单元格 | `worksheet["A1"]` | 最短、最直观 |
+| 动态行列坐标 | `worksheet.cell(row, column)` | 统一 0-based、先行后列 |
+| 连续矩形数据 | `worksheet.range("A1:C10")` | 集中读取、写入、合并 |
+| 连续追加二维数据 | `worksheet.append_rows(rows)` | 自动从下一空行开始 |
+| 按名称或顺序取表 | `workbook.sheet(name_or_index)` | 一个方法覆盖两种清晰参数类型 |
+| 永久改变单元格类型 | `cell.set_value(value).as_int()` 等 | 转换结果写回并保存 |
+| 只在 Python 中临时转换 | `cell.read().as_int()` 等 | 不改变工作簿 |
+| 打印适应一页宽 | `worksheet.page.fit()` | 一次调用，不必维护两个属性 |
+| Excel 模板批量生成 | `Workbook.load(...).render(...).save(...)` | 保留模板内容和样式 |
+
+不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
+`fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
+
+## 18. 0.2.0 API 速查表
+
+| 对象/模块 | 稳定公开 API |
+|---|---|
+| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`sheets`、`active`、`load`、`render`、`save`、`len()` |
+| `Worksheet` | `label`、`label_color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze`、`filter_range`、`show_gridlines`、`page`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
+| `Cell` | `row`、`column`、`address`、`value`、`formula`、`style`、`set_value`、`read`、六种 `as_*` |
+| `CellValue` | `as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
+| `Range` | 四个 0-based 边界、`address`、`values`、`set_values`、`merge`、`unmerge` |
+| 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
+| 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
+| `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`parse_range`、`cell_address` |
+| `excelkit.errors` | `ExcelKitError`、`InvalidAddressError`、`InvalidWorksheetNameError`、`InvalidFileError`、`TemplateError` |
+
+0.2.x 内保持上述公开名称和参数语义兼容；以下划线开头的属性、方法和模块属于内部
+实现，不纳入稳定性承诺。新增向后兼容能力使用补丁或次版本号；破坏性公开 API
+变更只在新的主版本中进行并写入更新日志。

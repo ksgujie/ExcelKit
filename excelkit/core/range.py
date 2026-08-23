@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, List
 
+from ..address import cell_address
+
 if TYPE_CHECKING:
     from .worksheet import Worksheet
 
@@ -76,6 +78,18 @@ class Range:
         return self._max_column
 
     @property
+    def address(self) -> str:
+        """功能：取得区域规范化的大写A1地址。
+
+        使用方法：``worksheet.range("a1:c3").address`` 返回 ``"A1:C3"``。
+        参数：无。
+        返回：包含起止单元格的A1区域字符串。
+        """
+        start = cell_address(self._min_row, self._min_column)
+        end = cell_address(self._max_row, self._max_column)
+        return f"{start}:{end}"
+
+    @property
     def values(self) -> List[List[Any]]:
         """功能：读取区域内的全部普通值。
 
@@ -129,10 +143,44 @@ class Range:
 
         # 完整形状验证通过后才开始写入，避免尺寸错误造成部分覆盖。
         for row_offset, row_values in enumerate(materialized):
+            for column_offset, _value in enumerate(row_values):
+                row = self._min_row + row_offset
+                column = self._min_column + column_offset
+                anchor = self._worksheet._merged_anchor(row, column)
+                if anchor is not None and anchor != (row, column):
+                    raise ValueError("不能向合并区域的非左上角单元格批量写入值")
+        for row_offset, row_values in enumerate(materialized):
             for column_offset, value in enumerate(row_values):
                 self._worksheet._set_value(
                     self._min_row + row_offset,
                     self._min_column + column_offset,
                     value,
                 )
+        return self
+
+    def merge(self) -> "Range":
+        """功能：合并当前矩形区域并保留左上角单元格内容。
+
+        使用方法：``worksheet.range("A1:C1").merge()``。
+        参数：无，区域边界在创建 ``Range`` 时已经验证。
+        返回：当前 :class:`Range`，支持链式调用。
+        异常：区域只有一个单元格、与已有合并区域重叠，或除左上角外存在值或公式时
+        抛出 ``ValueError``，失败时工作表保持不变。
+        """
+        self._worksheet._merge_range(
+            self._min_row, self._min_column, self._max_row, self._max_column
+        )
+        return self
+
+    def unmerge(self) -> "Range":
+        """功能：取消与当前边界完全相同的合并区域。
+
+        使用方法：``worksheet.range("A1:C1").unmerge()``。
+        参数：无。
+        返回：当前 :class:`Range`，左上角内容保持不变。
+        异常：当前边界不是一个完整合并区域时抛出 ``ValueError``。
+        """
+        self._worksheet._unmerge_range(
+            self._min_row, self._min_column, self._max_row, self._max_column
+        )
         return self

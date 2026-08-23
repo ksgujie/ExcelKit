@@ -12,7 +12,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence, Union
 
-from ..address import cell_address
+from ..address import cell_address, index_to_column, parse_range
+from ..core.page import header_footer_text
 from ..style import DEFAULT_STYLE
 from .styles import StyleRegistry
 
@@ -33,6 +34,7 @@ _ILLEGAL_XML_CHARACTERS = re.compile(
     "[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]"
 )
 _EXCEL_ESCAPE_PATTERN = re.compile(r"_x[0-9A-Fa-f]{4}_")
+_PAPER_SIZE_CODES = {"Letter": 1, "Legal": 5, "A3": 8, "A4": 9, "A5": 11}
 
 
 def _qname(namespace: str, local_name: str) -> str:
@@ -169,6 +171,46 @@ def workbook_xml(sheets: Sequence["Worksheet"]) -> bytes:
                 _qname(_REL_NS, "id"): f"rId{sheet_index + 1}",
             },
         )
+    defined_names = []
+    for sheet_index, worksheet in enumerate(sheets):
+        sheet_name = worksheet.label.replace("'", "''")
+        prefix = f"'{sheet_name}'!"
+        if worksheet.page.area is not None:
+            min_row, min_column, max_row, max_column = parse_range(
+                worksheet.page.area
+            )
+            area = (
+                f"${index_to_column(min_column)}${min_row + 1}:"
+                f"${index_to_column(max_column)}${max_row + 1}"
+            )
+            defined_names.append(
+                ("_xlnm.Print_Area", sheet_index, prefix + area)
+            )
+        titles = []
+        if worksheet.page.repeat_rows is not None:
+            start, end = worksheet.page.repeat_rows
+            titles.append(f"${start + 1}:${end + 1}")
+        if worksheet.page.repeat_columns is not None:
+            start, end = worksheet.page.repeat_columns
+            titles.append(
+                f"${index_to_column(start)}:${index_to_column(end)}"
+            )
+        if titles:
+            defined_names.append(
+                (
+                    "_xlnm.Print_Titles",
+                    sheet_index,
+                    ",".join(prefix + title for title in titles),
+                )
+            )
+    if defined_names:
+        container = ET.SubElement(root, _qname(_MAIN_NS, "definedNames"))
+        for name, sheet_index, value in defined_names:
+            ET.SubElement(
+                container,
+                _qname(_MAIN_NS, "definedName"),
+                {"name": name, "localSheetId": str(sheet_index)},
+            ).text = value
     return _xml_bytes(root)
 
 
@@ -272,13 +314,22 @@ def sheet_xml(
     返回：包含精确数据边界和 ``sheetData`` 的 UTF-8 XML 字节串。
     """
     root = ET.Element(_qname(_MAIN_NS, "worksheet"))
-    if sheet.label_color is not None:
+    page = sheet.page
+    fit_mode = page.scale is None and (
+        page._fit_width is not None or page._fit_height is not None
+    )
+    if sheet.label_color is not None or fit_mode:
         properties = ET.SubElement(root, _qname(_MAIN_NS, "sheetPr"))
-        ET.SubElement(
-            properties,
-            _qname(_MAIN_NS, "tabColor"),
-            {"rgb": sheet.label_color},
-        )
+        if sheet.label_color is not None:
+            ET.SubElement(
+                properties,
+                _qname(_MAIN_NS, "tabColor"),
+                {"rgb": sheet.label_color},
+            )
+        if fit_mode:
+            ET.SubElement(
+                properties, _qname(_MAIN_NS, "pageSetUpPr"), {"fitToPage": "1"}
+            )
     if style_registry is None:
         style_registry = StyleRegistry([sheet])
     values = dict(sheet._values.items())
@@ -293,11 +344,71 @@ def sheet_xml(
         dimension = "A1"
     ET.SubElement(root, _qname(_MAIN_NS, "dimension"), {"ref": dimension})
 
+    sheet_views = ET.SubElement(root, _qname(_MAIN_NS, "sheetViews"))
+    view_attributes = {"workbookViewId": "0"}
+    if not sheet.show_gridlines:
+        view_attributes["showGridLines"] = "0"
+    sheet_view = ET.SubElement(
+        sheet_views, _qname(_MAIN_NS, "sheetView"), view_attributes
+    )
+    if sheet.freeze is not None:
+        freeze_row, freeze_column = parse_range(
+            f"{sheet.freeze}:{sheet.freeze}"
+        )[:2]
+        pane_attributes = {"state": "frozen", "topLeftCell": sheet.freeze}
+        if freeze_column:
+            pane_attributes["xSplit"] = str(freeze_column)
+        if freeze_row:
+            pane_attributes["ySplit"] = str(freeze_row)
+        pane = (
+            "bottomRight" if freeze_row and freeze_column
+            else "bottomLeft" if freeze_row else "topRight"
+        )
+        pane_attributes["activePane"] = pane
+        ET.SubElement(sheet_view, _qname(_MAIN_NS, "pane"), pane_attributes)
+        ET.SubElement(
+            sheet_view,
+            _qname(_MAIN_NS, "selection"),
+            {"pane": pane, "activeCell": sheet.freeze, "sqref": sheet.freeze},
+        )
+
+    custom_columns = [
+        dimension for _index, dimension in sorted(sheet._columns.items())
+        if not dimension._is_default()
+    ]
+    if custom_columns:
+        cols = ET.SubElement(root, _qname(_MAIN_NS, "cols"))
+        for column in custom_columns:
+            attributes = {
+                "min": str(column.index + 1),
+                "max": str(column.index + 1),
+            }
+            if column.width is not None:
+                attributes.update({"width": str(column.width), "customWidth": "1"})
+            if column.hidden:
+                attributes["hidden"] = "1"
+            ET.SubElement(cols, _qname(_MAIN_NS, "col"), attributes)
+
     sheet_data = ET.SubElement(root, _qname(_MAIN_NS, "sheetData"))
-    row_indexes = sorted({row for row, _column in coordinates})
+    row_indexes = sorted(
+        {row for row, _column in coordinates}
+        | {
+            index for index, dimension in sheet._rows.items()
+            if not dimension._is_default()
+        }
+    )
     for row in row_indexes:
+        row_attributes = {"r": str(row + 1)}
+        row_dimension = sheet._rows.get(row)
+        if row_dimension is not None:
+            if row_dimension.height is not None:
+                row_attributes.update(
+                    {"ht": str(row_dimension.height), "customHeight": "1"}
+                )
+            if row_dimension.hidden:
+                row_attributes["hidden"] = "1"
         row_element = ET.SubElement(
-            sheet_data, _qname(_MAIN_NS, "row"), {"r": str(row + 1)}
+            sheet_data, _qname(_MAIN_NS, "row"), row_attributes
         )
         columns = sorted(column for item_row, column in coordinates if item_row == row)
         for column in columns:
@@ -315,6 +426,75 @@ def sheet_xml(
                 if style_id:
                     element.set("s", str(style_id))
                 row_element.append(element)
+    if sheet.filter_range is not None:
+        ET.SubElement(
+            root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.filter_range}
+        )
+    if sheet._merged_ranges:
+        merge_cells = ET.SubElement(
+            root,
+            _qname(_MAIN_NS, "mergeCells"),
+            {"count": str(len(sheet._merged_ranges))},
+        )
+        for min_row, min_column, max_row, max_column in sheet._merged_ranges:
+            ET.SubElement(
+                merge_cells,
+                _qname(_MAIN_NS, "mergeCell"),
+                {
+                    "ref": (
+                        f"{cell_address(min_row, min_column)}:"
+                        f"{cell_address(max_row, max_column)}"
+                    )
+                },
+            )
+
+    print_options = {
+        "horizontalCentered": "1" if page.center_horizontal else "0",
+        "verticalCentered": "1" if page.center_vertical else "0",
+        "gridLines": "1" if page.print_gridlines else "0",
+        "headings": "1" if page.print_headings else "0",
+    }
+    ET.SubElement(root, _qname(_MAIN_NS, "printOptions"), print_options)
+    margins = page.margins
+    ET.SubElement(
+        root,
+        _qname(_MAIN_NS, "pageMargins"),
+        {
+            name: str(getattr(margins, name) / 2.54)
+            for name in ("left", "right", "top", "bottom", "header", "footer")
+        },
+    )
+    setup_attributes = {
+        "orientation": page.orientation,
+        "paperSize": str(_PAPER_SIZE_CODES[page.paper_size]),
+        "pageOrder": (
+            "downThenOver" if page.order == "down_then_over" else "overThenDown"
+        ),
+        "blackAndWhite": "1" if page.black_and_white else "0",
+        "draft": "1" if page.draft else "0",
+    }
+    if page.scale is not None:
+        setup_attributes["scale"] = str(page.scale)
+    else:
+        setup_attributes["fitToWidth"] = str(page._fit_width or 0)
+        setup_attributes["fitToHeight"] = str(page._fit_height or 0)
+    if page.first_page_number is not None:
+        setup_attributes["firstPageNumber"] = str(page.first_page_number)
+        setup_attributes["useFirstPageNumber"] = "1"
+    ET.SubElement(root, _qname(_MAIN_NS, "pageSetup"), setup_attributes)
+
+    header_text = header_footer_text(page.header)
+    footer_text = header_footer_text(page.footer)
+    if header_text or footer_text:
+        header_footer = ET.SubElement(root, _qname(_MAIN_NS, "headerFooter"))
+        if header_text:
+            ET.SubElement(
+                header_footer, _qname(_MAIN_NS, "oddHeader")
+            ).text = header_text
+        if footer_text:
+            ET.SubElement(
+                header_footer, _qname(_MAIN_NS, "oddFooter")
+            ).text = footer_text
     return _xml_bytes(root)
 
 

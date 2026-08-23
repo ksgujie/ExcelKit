@@ -16,13 +16,14 @@ def create_template(filename: Path) -> None:
     worksheet = workbook.active
     worksheet["A1"] = "{title}"
     worksheet["A2"] = "客户：{customer.name}"
-    worksheet.append(["序号", "产品", "数量", "单价", "金额"])
+    worksheet.append(["序号", "产品", "数量", "单价", "金额", "显示金额"])
     worksheet["A4"] = "{loop items}"
-    worksheet["A5"] = "{items.@index}"
+    worksheet["A5"] = "{items.@index + 1}"
     worksheet["B5"] = "{items.name}"
     worksheet["C5"] = "{items.quantity}"
     worksheet["D5"] = "{items.price}"
-    worksheet["E5"].formula = "=C5*D5"
+    worksheet["E5"] = "{items.quantity * items.price}"
+    worksheet["F5"] = '￥{items.quantity * items.price | format:",.2f"}'
     worksheet["A6"] = "{/loop}"
     worksheet["A7"] = "制表人：{operator}"
 
@@ -33,9 +34,15 @@ def create_template(filename: Path) -> None:
     )
     row_style = Style(alignment=Alignment(vertical="center"))
     worksheet["A1"].style = title_style
-    for column in range(5):
+    for column in range(6):
         worksheet.cell(2, column).style = Style(font=Font(bold=True))
         worksheet.cell(4, column).style = row_style
+    worksheet["D5"].style = Style(
+        alignment=Alignment(vertical="center"), number_format="#,##0.00"
+    )
+    worksheet["E5"].style = Style(
+        alignment=Alignment(vertical="center"), number_format="#,##0.00"
+    )
     workbook.save(filename)
 
 
