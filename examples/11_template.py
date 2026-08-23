@@ -6,14 +6,15 @@ from excelkit import Alignment, Fill, Font, Style, Workbook
 
 
 def create_template(filename: Path) -> None:
-    """功能：创建一个可用 Excel 打开和编辑的销售报表模板。
+    """功能：创建一个可用 Excel 打开和编辑的多工作表销售报表模板。
 
     使用方法：``create_template(Path('销售模板.xlsx'))``。
     参数：``filename`` 为待生成的 XLSX 模板路径。
-    返回：``None``；模板包含标量标签、循环标记、样式和公式。
+    返回：``None``；模板包含明细与汇总表、标量标签、循环、样式和公式。
     """
     workbook = Workbook()
     worksheet = workbook.active
+    worksheet.label = "销售明细"
     worksheet["A1"] = "{title}"
     worksheet["A2"] = "客户：{customer.name}"
     worksheet.append(["序号", "产品", "数量", "单价", "金额", "显示金额"])
@@ -43,11 +44,16 @@ def create_template(filename: Path) -> None:
     worksheet["E5"].style = Style(
         alignment=Alignment(vertical="center"), number_format="#,##0.00"
     )
+
+    summary = workbook.add_sheet("汇总")
+    summary["A1"] = "公司：{company}"
+    summary["A2"] = "合计：{total}"
+    summary["A3"] = "备注：{note}"
     workbook.save(filename)
 
 
 def main() -> None:
-    """功能：创建 Excel 模板，填充数据并生成最终报表。
+    """功能：创建 Excel 模板，以公共和分工作表数据生成最终报表。
 
     使用方法：在项目根目录执行 ``python -m examples.11_template``。
     参数：无。
@@ -57,17 +63,23 @@ def main() -> None:
     output_file = Path("11_template_result.xlsx")
     create_template(template_file)
 
-    data = {
-        "title": "2026 年 8 月销售明细",
-        "customer": {"name": "示例公司"},
-        "operator": "张三",
-        "items": [
-            {"name": "产品 A", "quantity": 2, "price": 19.5},
-            {"name": "产品 B", "quantity": 3, "price": 8},
-            {"name": "产品 C", "quantity": 1, "price": 120},
-        ],
+    shared_data = {"company": "示例公司"}
+    sheet_data = {
+        "销售明细": {
+            "title": "2026 年 8 月销售明细",
+            "customer": {"name": "示例公司"},
+            "operator": "张三",
+            "items": [
+                {"name": "产品 A", "quantity": 2, "price": 19.5},
+                {"name": "产品 B", "quantity": 3, "price": 8},
+                {"name": "产品 C", "quantity": 1, "price": 120},
+            ],
+        },
+        "汇总": {"total": 183},
     }
-    Workbook.load(template_file).render(data).save(output_file)
+    Workbook.load(template_file).render(
+        shared_data, by_sheet=sheet_data
+    ).save(output_file)
     print(f"模板：{template_file.resolve()}")
     print(f"结果：{output_file.resolve()}")
 

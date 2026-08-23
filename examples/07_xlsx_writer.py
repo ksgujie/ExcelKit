@@ -16,7 +16,7 @@ def main() -> None:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.append(["项目", "值"])
-    worksheet.append(["版本", "0.2.0"])
+    worksheet.append(["版本", "0.2.1"])
 
     output = Path("07_xlsx_writer.xlsx")
     XlsxWriter(workbook).write(output)

@@ -1,14 +1,14 @@
-# ExcelKit 0.2.0
+# ExcelKit 0.2.1
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.2.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.2.1 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.2.0-py3-none-any.whl
+pip install excelkit-0.2.1-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -57,7 +57,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `sheets`：按创建顺序返回工作表 tuple。
 - `active`：返回第一张工作表；空工作簿会创建 `Sheet1`。
 - `Workbook.load(filename)`：读取 XLS、XLSX、XLSM、XLTX、CSV 或 TSV。
-- `render(data, strict=True)`：替换模板标签并展开循环行块。
+- `render(data=None, *, by_sheet=None, strict=False)`：使用公共或分工作表数据
+  替换模板标签并展开循环行块。
 - `save(filename)`：按扩展名保存 XLSX 或 XLS，并返回当前工作簿。
 
 ### Worksheet
@@ -268,14 +269,34 @@ Workbook.load("report_template.xlsx").render({
 }).save("report.xlsx")
 ```
 
+多张工作表可以分别接收独立根数据，公共字段会合并到每张目标表，同名字段由工作表
+独立数据覆盖：
+
+```python
+workbook = Workbook.load("multi_sheet_template.xlsx")
+workbook.render(
+    {"company": "示例公司", "created_at": "#2026-8-1 12:33"},
+    by_sheet={
+        "封面": {"title": "销售报表"},
+        "销售明细": {"items": [...]},
+        2: {"total": 1000},  # 0-based工作表索引。
+    },
+).save("multi_sheet_result.xlsx")
+```
+
+使用 `by_sheet` 时只渲染其中列出的工作表，其他表保持不变；所有目标表原子提交，
+任意一张失败都不会留下部分渲染结果。
+
 - 循环体必须用集合名称作为前缀，如 `{items.name}`；`{name}` 始终指根数据。
 - `{items.@index}` 返回当前元素的 0-based 索引；`{items.@index + 1}` 从 1 显示。
 - 数值表达式支持 `+ - * / // %` 和括号，不允许函数调用或任意 Python 代码。
 - `| format:"格式"` 使用 Python 格式规则生成显示字符串，例如 `",.2f"`。
 - 整个单元格只有一个标签时保留原始类型，混合文字时转换为字符串。
 - 循环复制会保留样式，并调整复制公式及移动公式的相对行引用。
-- `strict=False` 会保留缺失的普通标签；循环集合缺失或结构错误始终抛出
-  `TemplateError`。
+- `strict=False` 是默认值：整格缺失标签清空，混合文本删除标签，缺失循环集合按
+  空数组处理，公式缺失模板数据时删除整条公式。
+- `strict=True` 会在任意字段或循环集合缺失时抛出 `TemplateError`；循环结构、
+  非法表达式、除零及无效格式字符串在两种模式下都会报错。
 
 ## 工作表布局与打印
 
@@ -326,7 +347,7 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.2.0 能力边界
+## 0.2.1 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存、区域批量写入、基础样式、模板

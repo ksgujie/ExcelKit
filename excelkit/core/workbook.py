@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 from collections.abc import Mapping
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from ..errors import InvalidWorksheetNameError
 from .worksheet import Worksheet
@@ -238,19 +238,33 @@ class Workbook:
             XlsxWriter(self).write(filename)
         return self
 
-    def render(self, data: Mapping[str, Any], *, strict: bool = True) -> "Workbook":
-        """功能：使用数据替换工作簿模板标签并展开循环行块。
+    def render(
+        self,
+        data: Optional[Mapping[str, Any]] = None,
+        *,
+        by_sheet: Optional[
+            Mapping[Union[str, int], Mapping[str, Any]]
+        ] = None,
+        strict: bool = False,
+    ) -> "Workbook":
+        """功能：使用公共及分工作表数据替换模板标签并展开循环行块。
 
-        使用方法：``Workbook.load('模板.xlsx').render(data).save('结果.xlsx')``。
-        参数：``data`` 必须是映射对象；``strict`` 为 ``True`` 时缺失普通标签抛出
-        ``TemplateError``，为 ``False`` 时保留未解析标签。循环集合始终必须存在。
+        使用方法：``workbook.render(data)`` 使用一份公共数据渲染全部工作表；
+        ``workbook.render(data, by_sheet={"明细": local})`` 只渲染指定工作表，
+        并让工作表数据覆盖同名公共字段。
+        参数：``data`` 为所有目标工作表共享的根映射，``None`` 等价于空映射；
+        ``by_sheet`` 为以工作表名称或0-based索引为键、独立根映射为值的映射；
+        ``strict`` 默认为 ``False``，缺失标签按空值处理，为 ``True`` 时立即报错。
         返回：当前 :class:`Workbook`，支持链式调用。
-        异常：参数类型错误时抛出 ``TypeError``；标签、循环结构或数据不符合要求时
-        抛出 ``TemplateError``，且工作簿保持渲染前状态。
+        异常：参数、工作表标识或独立数据无效时抛出 ``TypeError``、``KeyError``、
+        ``IndexError`` 或 ``ValueError``；严格模式缺失数据、循环结构或表达式错误时
+        抛出 ``TemplateError``。任一目标失败时所有工作表保持渲染前状态。
         """
         from ..template import render_workbook
 
-        return render_workbook(self, data, strict)
+        return render_workbook(
+            self, data, by_sheet=by_sheet, strict=strict
+        )
 
     def __len__(self) -> int:
         """功能：返回工作簿当前包含的工作表数量。

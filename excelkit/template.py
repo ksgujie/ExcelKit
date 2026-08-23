@@ -7,7 +7,7 @@ import math
 import operator
 import re
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from .address import MAX_ROW
 from .core.worksheet import _normalize_value
@@ -279,13 +279,16 @@ def _render_text(
     item: Any = _MISSING,
     item_index: Optional[int] = None,
     loop_name: Optional[str] = None,
+    drop_on_missing: bool = False,
 ) -> Any:
     """功能：替换字符串中的模板标签，并为整格标签保留原数据类型。
 
     使用方法：渲染普通值和带标签公式时内部调用。
     参数：``value`` 为模板字符串；``context`` 为根数据；``strict`` 控制缺失标签
-    是否报错；``item``、``item_index``、``loop_name`` 为可选循环作用域。
-    返回：整格只有一个标签时返回原类型值；混合文本返回替换后的字符串。
+    是否报错；``item``、``item_index``、``loop_name`` 为可选循环作用域；
+    ``drop_on_missing`` 为 ``True`` 时任一缺失值返回内部缺失标记，供公式整体删除。
+    返回：整格只有一个标签时返回原类型值；混合文本返回替换后的字符串；非严格
+    模式的整格缺失标签返回 ``None``，公式缺失返回内部缺失标记。
     异常：严格模式遇到缺失标签时抛出 :class:`TemplateError`。
     """
     matches = _placeholder_matches(value)
@@ -299,7 +302,7 @@ def _render_text(
         if result is _MISSING:
             if strict:
                 raise TemplateError(f"模板数据缺少标签：{{{expression}}}")
-            return value
+            return _MISSING if drop_on_missing else None
         return result
 
     parts: List[str] = []
@@ -313,9 +316,12 @@ def _render_text(
         if result is _MISSING:
             if strict:
                 raise TemplateError(f"模板数据缺少标签：{{{expression}}}")
-            parts.append(match.group(0))
+            if drop_on_missing:
+                return _MISSING
         elif result is not None:
             parts.append(str(result))
+        elif drop_on_missing:
+            return _MISSING
         position = match.end()
     parts.append(value[position:])
     return "".join(parts)
@@ -414,16 +420,19 @@ def _loop_blocks(
     return blocks
 
 
-def _sequence(value: Any, name: str) -> List[Any]:
+def _sequence(value: Any, name: str, strict: bool) -> List[Any]:
     """功能：把循环数据物化为可重复遍历的列表。
 
     使用方法：展开每个循环块前调用。
-    参数：``value`` 为标签解析结果；``name`` 为用于错误信息的数据路径。
+    参数：``value`` 为标签解析结果；``name`` 为用于错误信息的数据路径；
+    ``strict`` 为 ``False`` 时缺失集合按空列表处理，为 ``True`` 时缺失即报错。
     返回：由原可迭代对象物化得到的列表。
     异常：字符串、字节、映射或不可迭代值会抛出 :class:`TemplateError`。
     """
     if value is _MISSING:
-        raise TemplateError(f"模板数据缺少循环集合：{{loop {name}}}")
+        if strict:
+            raise TemplateError(f"模板数据缺少循环集合：{{loop {name}}}")
+        return []
     if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, Iterable):
         raise TemplateError(f"循环数据 {name!r} 必须是列表或其他非映射可迭代对象")
     return list(value)
@@ -465,13 +474,18 @@ def _render_sheet(
                 values[coordinate] = rendered
     for coordinate, formula in list(formulas.items()):
         if coordinate[0] not in loop_rows:
-            rendered_formula = _render_text(formula, context, strict)
-            if not isinstance(rendered_formula, str):
+            rendered_formula = _render_text(
+                formula, context, strict, drop_on_missing=True
+            )
+            if rendered_formula is _MISSING or rendered_formula is None:
+                formulas.pop(coordinate)
+            elif not isinstance(rendered_formula, str):
                 raise TemplateError("公式模板渲染结果必须是字符串")
-            formulas[coordinate] = rendered_formula
+            else:
+                formulas[coordinate] = rendered_formula
 
     for start_row, end_row, name in reversed(blocks):
-        items = _sequence(_path(context, name), name)
+        items = _sequence(_path(context, name), name, strict)
         template_start = start_row + 1
         template_height = end_row - template_start
         expanded_height = template_height * len(items)
@@ -533,8 +547,16 @@ def _render_sheet(
                     start_row + item_index * template_height + row - template_start
                 )
                 rendered_formula = _render_text(
-                    formula, context, strict, item, item_index, name
+                    formula,
+                    context,
+                    strict,
+                    item,
+                    item_index,
+                    name,
+                    drop_on_missing=True,
                 )
+                if rendered_formula is _MISSING or rendered_formula is None:
+                    continue
                 if not isinstance(rendered_formula, str):
                     raise TemplateError("公式模板渲染结果必须是字符串")
                 new_formulas[(destination_row, column)] = _translate_formula(
@@ -554,23 +576,53 @@ def _render_sheet(
 
 
 def render_workbook(
-    workbook: "Workbook", context: Mapping[str, Any], strict: bool = True
+    workbook: "Workbook",
+    context: Optional[Mapping[str, Any]] = None,
+    *,
+    by_sheet: Optional[
+        Mapping[Union[str, int], Mapping[str, Any]]
+    ] = None,
+    strict: bool = False,
 ) -> "Workbook":
-    """功能：原子渲染工作簿中的标量标签和循环行块。
+    """功能：使用公共或分工作表上下文原子渲染标量标签和循环行块。
 
     使用方法：由 ``workbook.render(data)`` 唯一公开入口调用。
-    参数：``workbook`` 为待渲染工作簿；``context`` 为根数据映射；``strict`` 为
-    ``True`` 时缺少普通标签立即报错，为 ``False`` 时保留未解析标签。
+    参数：``workbook`` 为待渲染工作簿；``context`` 为共享根映射或 ``None``；
+    ``by_sheet`` 以工作表名称或0-based索引映射到独立根数据；``strict`` 为
+    ``True`` 时缺失数据立即报错，为 ``False`` 时标签按空值处理。
     返回：传入的同一个 Workbook，支持继续 ``save()`` 链式调用。
-    异常：数据不是映射、strict 不是布尔值或任一工作表模板无效时抛出
-    ``TypeError`` 或 :class:`TemplateError`；失败时所有工作表保持原状。
+    异常：参数、工作表标识、数据或模板无效时抛出相应异常；失败时所有目标
+    工作表保持原状。
     """
-    if not isinstance(context, Mapping):
+    if context is None:
+        context = {}
+    elif not isinstance(context, Mapping):
         raise TypeError("模板数据必须是映射对象")
     if not isinstance(strict, bool):
         raise TypeError("strict 必须是布尔值")
-    results = [_render_sheet(sheet, context, strict) for sheet in workbook.sheets]
-    for worksheet, result in zip(workbook.sheets, results):
+    targets: List[Tuple["Worksheet", Mapping[str, Any]]] = []
+    if by_sheet is None:
+        targets = [(sheet, context) for sheet in workbook.sheets]
+    else:
+        if not isinstance(by_sheet, Mapping):
+            raise TypeError("by_sheet 必须是工作表标识到独立数据的映射")
+        seen = set()
+        for identifier, local_context in by_sheet.items():
+            worksheet = workbook.sheet(identifier)
+            if worksheet in seen:
+                raise ValueError("by_sheet 不能用不同标识重复指定同一张工作表")
+            if not isinstance(local_context, Mapping):
+                raise TypeError("by_sheet 中每张工作表的数据都必须是映射对象")
+            merged_context = dict(context)
+            merged_context.update(local_context)
+            targets.append((worksheet, merged_context))
+            seen.add(worksheet)
+
+    results = [
+        _render_sheet(worksheet, sheet_context, strict)
+        for worksheet, sheet_context in targets
+    ]
+    for (worksheet, _sheet_context), result in zip(targets, results):
         values, formulas, styles, max_row, max_column = result
         worksheet._values._values = values
         worksheet._formulas = formulas

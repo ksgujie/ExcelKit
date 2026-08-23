@@ -86,23 +86,40 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(workbook.active["D2"].formula, "=C2")
         self.assertEqual(workbook.active.max_row, 1)
 
-    def test_missing_data_is_atomic_and_non_strict_keeps_tag(self):
-        """功能：验证严格模式失败不修改工作簿，非严格模式保留普通缺失标签。
+    def test_missing_data_is_atomic_and_default_mode_clears_tag(self):
+        """功能：验证严格模式失败不修改工作簿，默认模式把缺失标签清为空值。
 
         使用方法：由 unittest 自动发现执行。
         参数：无。
-        返回：无；断言失败时由测试框架报告。
+        返回：无；断言整格、混合文本和公式中的缺失标签均不会残留。
         """
         workbook = self._template()
         original = workbook.active.values
         with self.assertRaises(TemplateError):
-            workbook.render({"items": []})
+            workbook.render({"items": []}, strict=True)
         self.assertEqual(workbook.active.values, original)
 
         plain = Workbook()
         plain.active["A1"] = "值：{missing}"
-        plain.render({}, strict=False)
-        self.assertEqual(plain.active["A1"].value, "值：{missing}")
+        plain.active["A2"] = "{missing}"
+        plain.active["A3"].formula = "=1+{missing}"
+        plain.render()
+        self.assertEqual(plain.active["A1"].value, "值：")
+        self.assertIsNone(plain.active["A2"].value)
+        self.assertIsNone(plain.active["A3"].formula)
+
+    def test_missing_loop_collection_is_empty_by_default(self):
+        """功能：验证默认模式把缺失循环集合视为空数组并删除循环块。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言循环标记和模板行消失，循环后的内容正确上移。
+        """
+        workbook = self._template()
+        workbook.render({"title": "无明细", "name": "管理员"})
+        self.assertEqual(workbook.active["A1"].value, "报表：无明细")
+        self.assertEqual(workbook.active["A2"].value, "尾部")
+        self.assertEqual(workbook.active["D2"].formula, "=C2")
 
     def test_invalid_loop_structure_and_data_raise_template_error(self):
         """功能：验证未配对、嵌套和非列表循环数据会得到模板异常。
@@ -232,23 +249,81 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(executed, [])
 
     def test_missing_expression_path_respects_strict_mode(self):
-        """功能：验证计算表达式缺失路径在严格和非严格模式下行为一致清晰。
+        """功能：验证计算表达式缺失路径在严格模式报错、默认模式清空。
 
         使用方法：由 unittest 自动发现执行。
         参数：无。
-        返回：无；严格模式报错，非严格模式保留完整原标签。
+        返回：无；严格模式报错，默认模式删除完整原标签。
         """
         strict_workbook = Workbook()
         strict_workbook.active["A1"] = "{price * quantity}"
         with self.assertRaises(TemplateError):
-            strict_workbook.render({"price": 8})
+            strict_workbook.render({"price": 8}, strict=True)
 
         relaxed_workbook = Workbook()
         relaxed_workbook.active["A1"] = "{price * quantity}"
-        relaxed_workbook.render({"price": 8}, strict=False)
-        self.assertEqual(
-            relaxed_workbook.active["A1"].value, "{price * quantity}"
+        relaxed_workbook.render({"price": 8})
+        self.assertIsNone(relaxed_workbook.active["A1"].value)
+
+    def test_by_sheet_combines_shared_and_independent_data(self):
+        """功能：验证一次调用可按名称或0-based索引为多张表提供独立根数据。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言公共字段共享、独立字段覆盖且未指定工作表不改变。
+        """
+        workbook = Workbook()
+        cover = workbook.add_sheet("封面")
+        detail = workbook.add_sheet("明细")
+        untouched = workbook.add_sheet("保留")
+        cover["A1"] = "{company}"
+        cover["B1"] = "{title}"
+        detail["A1"] = "{company}"
+        detail["B1"] = "{title}"
+        detail["A2"] = "{loop items}"
+        detail["A3"] = "{items.name}"
+        detail["A4"] = "{/loop}"
+        untouched["A1"] = "{remain}"
+
+        result = workbook.render(
+            {"company": "示例公司", "title": "公共标题"},
+            by_sheet={
+                "封面": {"title": "封面标题"},
+                1: {"title": "明细标题", "items": [{"name": "产品A"}]},
+            },
         )
+
+        self.assertIs(result, workbook)
+        self.assertEqual(cover.values, [["示例公司", "封面标题"]])
+        self.assertEqual(detail.values, [["示例公司", "明细标题"], ["产品A", None]])
+        self.assertEqual(untouched["A1"].value, "{remain}")
+
+    def test_by_sheet_validation_and_rendering_are_atomic(self):
+        """功能：验证分工作表标识、独立数据及严格渲染失败均不会部分提交。
+
+        使用方法：由 unittest 自动发现执行。
+        参数：无。
+        返回：无；断言重复工作表和目标表缺失字段得到异常且全部内容保持不变。
+        """
+        workbook = Workbook()
+        first = workbook.add_sheet("一")
+        second = workbook.add_sheet("二")
+        first["A1"] = "{value}"
+        second["A1"] = "{required}"
+        original = [sheet.values for sheet in workbook.sheets]
+
+        with self.assertRaises(ValueError):
+            workbook.render(by_sheet={"一": {"value": 1}, 0: {"value": 2}})
+        self.assertEqual([sheet.values for sheet in workbook.sheets], original)
+
+        with self.assertRaises(TemplateError):
+            workbook.render(
+                by_sheet={"一": {"value": 1}, "二": {}}, strict=True
+            )
+        self.assertEqual([sheet.values for sheet in workbook.sheets], original)
+
+        with self.assertRaises(TypeError):
+            workbook.render(by_sheet={"一": [1, 2]})
 
 
 if __name__ == "__main__":
