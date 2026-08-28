@@ -29,6 +29,10 @@ from ..validation import Validation
 from ..conditional import ConditionalFormat
 from ..protection import Protection
 from ..filter import AutoFilter
+from ..note import Note
+from ..sort import SortKey
+from ..chart import Chart, ChartType
+from ..image import Image
 
 if TYPE_CHECKING:
     from .workbook import Workbook
@@ -51,15 +55,21 @@ def _normalize_value(value: Any) -> Any:
 class Worksheet:
     """表示隶属于某个 :class:`Workbook` 的命名工作表。"""
 
+    VISIBLE = "visible"
+    HIDDEN = "hidden"
+    VERY_HIDDEN = "very_hidden"
+
     __slots__ = (
         "_workbook",
         "_name",
         "_color",
+        "_visibility",
         "_values",
         "_formulas",
         "_formula_values",
         "_formula_errors",
         "_hyperlinks",
+        "_notes",
         "_headers",
         "_styles",
         "_merged_ranges",
@@ -73,6 +83,8 @@ class Worksheet:
         "_tables",
         "_validations",
         "_conditionals",
+        "_charts",
+        "_images",
         "_protection",
         "_max_row",
         "_max_column",
@@ -88,11 +100,13 @@ class Worksheet:
         self._workbook = workbook
         self._name = name
         self._color: Optional[str] = None
+        self._visibility = self.VISIBLE
         self._values = ValueStore()
         self._formulas: Dict[Tuple[int, int], str] = {}
         self._formula_values: Dict[Tuple[int, int], Any] = {}
         self._formula_errors: Dict[Tuple[int, int], str] = {}
         self._hyperlinks: Dict[Tuple[int, int], Hyperlink] = {}
+        self._notes: Dict[Tuple[int, int], Note] = {}
         self._headers: Optional[Tuple[Any, ...]] = None
         self._styles: Dict[Tuple[int, int], Style] = {}
         self._merged_ranges: list[Tuple[int, int, int, int]] = []
@@ -106,6 +120,8 @@ class Worksheet:
         self._tables: Dict[str, Table] = {}
         self._validations: list[Validation] = []
         self._conditionals: list[ConditionalFormat] = []
+        self._charts: list[Chart] = []
+        self._images: list[Image] = []
         self._protection = Protection()
         self._max_row = -1
         self._max_column = -1
@@ -153,6 +169,32 @@ class Worksheet:
         异常：颜色类型、长度或十六进制字符无效时抛出 ``ValueError``。
         """
         self._color = _color(color)
+
+    @property
+    def visibility(self) -> str:
+        """功能：取得工作表可见状态。
+
+        使用方法：``state = worksheet.visibility``。
+        参数：无。
+        返回：``Worksheet.VISIBLE``、``Worksheet.HIDDEN`` 或
+        ``Worksheet.VERY_HIDDEN``。
+        """
+        return self._visibility
+
+    @visibility.setter
+    def visibility(self, value: str) -> None:
+        """功能：设置工作表可见状态。
+
+        使用方法：``worksheet.visibility = Worksheet.HIDDEN``。
+        参数：``value`` 必须为 ``VISIBLE``、``HIDDEN``、``VERY_HIDDEN`` 三个常量之一。
+        返回：``None``。
+        异常：类型或值无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(value, str):
+            raise TypeError("visibility 必须是字符串常量")
+        if value not in {self.VISIBLE, self.HIDDEN, self.VERY_HIDDEN}:
+            raise ValueError("visibility 必须是 Worksheet.VISIBLE、HIDDEN 或 VERY_HIDDEN")
+        self._visibility = value
 
     @property
     def headers(self) -> Optional[Tuple[Any, ...]]:
@@ -392,6 +434,162 @@ class Worksheet:
             raise ValueError("条件格式规则不属于当前工作表")
         self._conditionals.remove(item)
         return self
+
+    @staticmethod
+    def _sort_value(value: Any) -> tuple[int, Any]:
+        """功能：把不同 Python 值规范为稳定可比较的排序键。
+
+        使用方法：由 :meth:`sort` 内部调用。
+        参数：``value`` 为普通值或公式缓存值。
+        返回：包含类型优先级及规范化值的二元组，空值会排在其他值之前。
+        """
+        if value is None:
+            return 0, ""
+        if isinstance(value, bool):
+            return 1, int(value)
+        if isinstance(value, (int, float)):
+            return 2, value
+        return 3, str(value).casefold()
+
+    def sort(
+        self,
+        address: str,
+        *,
+        keys: Iterable[SortKey],
+        has_header: bool = False,
+    ) -> "Worksheet":
+        """功能：按一个或多个区域内 0-based 相对列键排序连续矩形区域。
+
+        使用方法：``ws.sort('A2:D100', keys=[SortKey(1, descending=True)])``。
+        参数：``address`` 为排序 A1 区域；``keys`` 为非空 ``SortKey`` 可迭代对象，
+        每个 ``column`` 相对于区域左侧且从0开始；``has_header`` 为真时首行不排序。
+        返回：当前工作表，支持链式调用。
+        异常：键、区域或合并区域不适合排序时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        area = self.range(address)
+        if not isinstance(has_header, bool):
+            raise TypeError("has_header 必须是 bool")
+        prepared_keys = tuple(keys)
+        if not prepared_keys or any(not isinstance(key, SortKey) for key in prepared_keys):
+            raise TypeError("keys 必须是非空 SortKey 可迭代对象")
+        width = area.max_column - area.min_column + 1
+        if any(key.column >= width for key in prepared_keys):
+            raise ValueError("排序键列索引超出区域")
+        if any(
+            not (merged.max_row < area.min_row or merged.min_row > area.max_row
+                 or merged.max_column < area.min_column or merged.min_column > area.max_column)
+            for merged in self.merged_ranges
+        ):
+            raise ValueError("包含合并单元格的区域不能排序")
+        first_row = area.min_row + int(has_header)
+        source_rows = list(range(first_row, area.max_row + 1))
+        for key in reversed(prepared_keys):
+            column = area.min_column + key.column
+            source_rows.sort(
+                key=lambda row: self._sort_value(
+                    self._formula_values.get((row, column), self._values.get(row, column))
+                ),
+                reverse=key.descending,
+            )
+        mappings = (
+            self._values._values, self._formulas, self._formula_values,
+            self._formula_errors, self._hyperlinks, self._notes, self._styles,
+        )
+        for mapping in mappings:
+            source_values = {
+                (row, column): mapping[(row, column)]
+                for row in range(first_row, area.max_row + 1)
+                for column in range(area.min_column, area.max_column + 1)
+                if (row, column) in mapping
+            }
+            for row in range(first_row, area.max_row + 1):
+                for column in range(area.min_column, area.max_column + 1):
+                    mapping.pop((row, column), None)
+            for target_row, source_row in zip(range(first_row, area.max_row + 1), source_rows):
+                for column in range(area.min_column, area.max_column + 1):
+                    value = source_values.get((source_row, column))
+                    if (source_row, column) in source_values:
+                        mapping[(target_row, column)] = value
+        self._workbook._invalidate_formula_caches()
+        return self
+
+    def add_chart(self, chart_type: str, *, anchor: str) -> Chart:
+        """功能：在当前工作表添加一个基础 XLSX 图表。
+
+        使用方法：``chart = ws.add_chart(ChartType.COLUMN, anchor='E2')``。
+        参数：``chart_type`` 为 ``ChartType.COLUMN``、``BAR``、``LINE``、``PIE``
+        常量之一；``anchor`` 为图表左上角单个 A1 单元格地址。
+        返回：新建 ``Chart``；调用其 ``add_series()`` 后保存为 XLSX 才会显示数据。
+        异常：图表类型或锚点无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(chart_type, str):
+            raise TypeError("chart_type 必须是 ChartType 字符串常量")
+        if chart_type not in {ChartType.COLUMN, ChartType.BAR, ChartType.LINE, ChartType.PIE}:
+            raise ValueError("不支持的图表类型")
+        row, column = cell_index(anchor)
+        chart = Chart(self, chart_type, cell_address(row, column))
+        self._charts.append(chart)
+        return chart
+
+    @property
+    def charts(self) -> tuple[Chart, ...]:
+        """功能：取得当前工作表全部图表的只读顺序快照。
+
+        使用方法：``for chart in worksheet.charts: ...``。
+        参数：无。
+        返回：按添加顺序排列的 ``tuple[Chart, ...]``，不可直接修改。
+        """
+        return tuple(self._charts)
+
+    def _remove_chart(self, chart: Chart) -> None:
+        """功能：删除当前工作表持有的图表对象。
+
+        使用方法：由 ``Chart.remove()`` 内部调用。
+        参数：``chart`` 为当前工作表创建的图表对象。
+        返回：``None``。
+        异常：图表不属于当前工作表时抛出 ``ValueError``。
+        """
+        if chart not in self._charts:
+            raise ValueError("图表不属于当前工作表")
+        self._charts.remove(chart)
+
+    def add_image(self, filename: str, *, anchor: str) -> Image:
+        """功能：在当前工作表添加 PNG 或 JPEG 图片。
+
+        使用方法：``image = ws.add_image('logo.png', anchor='A1')``。
+        参数：``filename`` 为图片文件路径；``anchor`` 为左上角单个 A1 地址。
+        返回：新建 ``Image``；其 ``width``、``height`` 为像素，``offset_x``、
+        ``offset_y`` 为像素偏移，均可在保存前修改。
+        异常：路径、格式或锚点无效时抛出文件系统异常、``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(filename, str):
+            raise TypeError("filename 必须是字符串路径")
+        row, column = cell_index(anchor)
+        image = Image(self, filename, cell_address(row, column))
+        self._images.append(image)
+        return image
+
+    @property
+    def images(self) -> tuple[Image, ...]:
+        """功能：取得当前工作表全部图片的只读顺序快照。
+
+        使用方法：``for image in worksheet.images: ...``。
+        参数：无。
+        返回：按添加顺序排列的 ``tuple[Image, ...]``，不可直接修改。
+        """
+        return tuple(self._images)
+
+    def _remove_image(self, image: Image) -> None:
+        """功能：删除当前工作表持有的图片对象。
+
+        使用方法：由 ``Image.remove()`` 内部调用。
+        参数：``image`` 为当前工作表创建的图片对象。
+        返回：``None``。
+        异常：图片不属于当前工作表时抛出 ``ValueError``。
+        """
+        if image not in self._images:
+            raise ValueError("图片不属于当前工作表")
+        self._images.remove(image)
 
     def add_table(
         self,
@@ -737,6 +935,43 @@ class Worksheet:
         self._hyperlinks[(row, column)] = value
         self._touch(row, column)
 
+    def _get_note(self, row: int, column: int) -> Optional[Note]:
+        """功能：读取指定位置的传统批注对象。
+
+        使用方法：由 ``Cell.note`` 读取器内部调用。
+        参数：``row``、``column`` 为 0-based 整数索引，顺序为先行后列。
+        返回：对应 ``Note`` 或 ``None``。
+        异常：索引无效时抛出 ``InvalidAddressError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        return self._notes.get((row, column))
+
+    def _set_note(self, row: int, column: int, value: Optional[Note | str]) -> None:
+        """功能：校验并设置或清除指定位置的传统批注。
+
+        使用方法：由 ``Cell.note`` 设置器内部调用。
+        参数：``value`` 可为 ``Note``、字符串正文或 ``None``；字符串使用默认作者
+        ``ExcelKit``。``row``、``column`` 为 0-based 坐标。
+        返回：``None``。
+        异常：类型、批注内容或合并区域位置无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        anchor = self._merged_anchor(row, column)
+        if anchor is not None and anchor != (row, column):
+            raise ValueError("只能向合并区域的左上角单元格设置批注")
+        if value is None:
+            self._notes.pop((row, column), None)
+        elif isinstance(value, Note):
+            self._notes[(row, column)] = value
+            self._touch(row, column)
+        elif isinstance(value, str):
+            self._notes[(row, column)] = Note(value)
+            self._touch(row, column)
+        else:
+            raise TypeError("note 必须是 Note、字符串或 None")
+
     @property
     def hyperlinks(self) -> tuple[tuple[str, Hyperlink], ...]:
         """功能：取得当前工作表全部超链接的只读快照。
@@ -937,6 +1172,7 @@ class Worksheet:
             self._formula_values,
             self._formula_errors,
             self._hyperlinks,
+            self._notes,
             self._styles,
         )
         for mapping in coordinate_maps:

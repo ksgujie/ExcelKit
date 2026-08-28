@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ..address import cell_address
 from ..hyperlink import Hyperlink
+from ..note import Note
 from ..style import Style
 from .conversion import (
     as_bool as _convert_bool,
@@ -208,6 +209,28 @@ class Cell:
         的非左上角单元格禁止设置。
         """
         self._worksheet._set_hyperlink(self._row, self._column, value)
+
+    @property
+    def note(self) -> Optional[Note]:
+        """功能：读取当前单元格的传统 Excel 批注。
+
+        使用方法：``note = worksheet['A1'].note``。
+        参数：无。
+        返回：已有批注时返回 ``Note``；没有批注时返回 ``None``。
+        """
+        return self._worksheet._get_note(self._row, self._column)
+
+    @note.setter
+    def note(self, value: Optional[Note | str]) -> None:
+        """功能：设置或清除当前单元格的传统 Excel 批注。
+
+        使用方法：``cell.note = '请复核'``；也可赋值 ``Note('请复核', author='财务部')``，
+        赋值 ``None`` 清除批注。
+        参数：``value`` 为字符串、``Note`` 或 ``None``。
+        返回：``None``；不会修改单元格值、公式或样式。
+        异常：类型、内容或合并区域位置无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        self._worksheet._set_note(self._row, self._column, value)
 
     @property
     def cached_value(self) -> Any:

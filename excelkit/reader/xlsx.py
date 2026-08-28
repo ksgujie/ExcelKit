@@ -615,6 +615,7 @@ def _load_sheet(
             worksheet._styles[(row, column)] = style
     _load_sheet_layout(root, worksheet, dxf_colors)
     _load_sheet_hyperlinks(package, member, root, worksheet)
+    _load_sheet_notes(package, member, worksheet)
     _load_sheet_tables(package, member, root, worksheet)
 
 
@@ -703,6 +704,49 @@ def _load_sheet_hyperlinks(
         if isinstance(error, InvalidFileError):
             raise
         raise InvalidFileError("工作表超链接定义无效") from error
+
+
+def _load_sheet_notes(
+    package: zipfile.ZipFile, member: str, worksheet: "Worksheet"
+) -> None:
+    """功能：读取工作表关系中引用的传统批注内容。
+
+    使用方法：单张工作表的单元格和布局读取完成后内部调用。
+    参数：``package`` 为 XLSX ZIP 包；``member`` 为工作表路径；``worksheet`` 为目标表。
+    返回：``None``；批注写入对应 ``Cell.note``。
+    异常：批注关系或 XML 损坏时抛出 :class:`InvalidFileError`。
+    """
+    relationships = _sheet_relationships(package, member)
+    targets = [
+        target for relationship_type, target in relationships.values()
+        if relationship_type.endswith("/comments")
+    ]
+    if not targets:
+        return
+    try:
+        root = _read_xml(package, targets[0])
+        authors = [item.text or "ExcelKit" for item in root.findall(
+            f"{_tag(_MAIN_NS, 'authors')}/{_tag(_MAIN_NS, 'author')}"
+        )]
+        comments = root.find(_tag(_MAIN_NS, "commentList"))
+        if comments is None:
+            return
+        from ..note import Note
+        for item in comments.findall(_tag(_MAIN_NS, "comment")):
+            address = item.get("ref")
+            if not address:
+                raise InvalidFileError("批注缺少单元格地址")
+            try:
+                author = authors[int(item.get("authorId", "0"))]
+            except (ValueError, IndexError) as error:
+                raise InvalidFileError("批注作者索引无效") from error
+            text_element = item.find(_tag(_MAIN_NS, "text"))
+            text = _all_text(text_element) if text_element is not None else ""
+            worksheet.cell(address).note = Note(text or " ", author=author)
+    except (TypeError, ValueError, KeyError) as error:
+        if isinstance(error, InvalidFileError):
+            raise
+        raise InvalidFileError("工作表批注定义无效") from error
 
 
 def _load_sheet_tables(
@@ -816,6 +860,13 @@ def _load_xlsx(
             if not name or not relationship_id or relationship_id not in targets:
                 raise InvalidFileError("工作表名称或关系信息不完整")
             worksheet = workbook.add_sheet(name)
+            state = sheet.get("state", "visible")
+            if state == "hidden":
+                worksheet.visibility = worksheet.HIDDEN
+            elif state == "veryHidden":
+                worksheet.visibility = worksheet.VERY_HIDDEN
+            elif state != "visible":
+                raise InvalidFileError(f"工作表可见状态无效：{state!r}")
             _load_sheet(
                 package, targets[relationship_id], worksheet, shared_strings,
                 styles, date_styles, date_1904, dxf_colors

@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence, Union
 
-from ..address import cell_address, index_to_column, range_index
+from ..address import cell_address, cell_index, index_to_column, range_index
 from ..core.page import header_footer_text
 from ..properties import WorkbookProperties
 from ..style import DEFAULT_STYLE
@@ -32,12 +32,24 @@ _DCTERMS_NS = "http://purl.org/dc/terms/"
 _DC_NS = "http://purl.org/dc/elements/1.1/"
 _XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_SPREADSHEET_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+_CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_VML_NS = "urn:schemas-microsoft-com:vml"
+_OFFICE_NS = "urn:schemas-microsoft-com:office:office"
+_EXCEL_NS = "urn:schemas-microsoft-com:office:excel"
 
 ET.register_namespace("", _MAIN_NS)
 ET.register_namespace("r", _REL_NS)
 ET.register_namespace("cp", _CORE_PROPERTIES_NS)
 ET.register_namespace("dcterms", _DCTERMS_NS)
 ET.register_namespace("dc", _DC_NS)
+ET.register_namespace("a", _DRAWING_NS)
+ET.register_namespace("xdr", _SPREADSHEET_DRAWING_NS)
+ET.register_namespace("c", _CHART_NS)
+ET.register_namespace("v", _VML_NS)
+ET.register_namespace("o", _OFFICE_NS)
+ET.register_namespace("x", _EXCEL_NS)
 ET.register_namespace("xsi", _XSI_NS)
 
 _ILLEGAL_XML_CHARACTERS = re.compile(
@@ -98,7 +110,14 @@ def _inline_string_cell(address: str, value: str) -> ET.Element:
     return cell
 
 
-def content_types(sheet_count: int, table_count: int = 0) -> bytes:
+def content_types(
+    sheet_count: int,
+    table_count: int = 0,
+    note_count: int = 0,
+    drawing_count: int = 0,
+    chart_count: int = 0,
+    image_extensions: Sequence[str] = (),
+) -> bytes:
     """功能：根据工作表数量生成 XLSX 内容类型声明。
 
     使用方法：``content_types(len(workbook.sheets))``；由 :class:`XlsxWriter`
@@ -114,12 +133,10 @@ def content_types(sheet_count: int, table_count: int = 0) -> bytes:
         or sheet_count < 1
     ):
         raise ValueError("工作表数量必须是大于等于 1 的整数")
-    if (
-        isinstance(table_count, bool)
-        or not isinstance(table_count, int)
-        or table_count < 0
-    ):
-        raise ValueError("数据表数量必须是非负整数")
+    for name, value in (("table_count", table_count), ("note_count", note_count),
+                        ("drawing_count", drawing_count), ("chart_count", chart_count)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} 必须是非负整数")
 
     root = ET.Element(_qname(_CONTENT_TYPES_NS, "Types"))
     ET.SubElement(
@@ -130,6 +147,20 @@ def content_types(sheet_count: int, table_count: int = 0) -> bytes:
             "ContentType": "application/vnd.openxmlformats-package.relationships+xml",
         },
     )
+    for extension in sorted(set(image_extensions)):
+        if extension not in {"png", "jpeg"}:
+            raise ValueError("图片扩展名只能是 png 或 jpeg")
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Default"),
+            {"Extension": extension, "ContentType": f"image/{extension}"},
+        )
+    if note_count:
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Default"),
+            {"Extension": "vml", "ContentType": "application/vnd.openxmlformats-officedocument.vmlDrawing"},
+        )
     ET.SubElement(
         root,
         _qname(_CONTENT_TYPES_NS, "Default"),
@@ -186,6 +217,33 @@ def content_types(sheet_count: int, table_count: int = 0) -> bytes:
                 ),
             },
         )
+    for note_id in range(1, note_count + 1):
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Override"),
+            {
+                "PartName": f"/xl/comments{note_id}.xml",
+                "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml",
+            },
+        )
+    for drawing_id in range(1, drawing_count + 1):
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Override"),
+            {
+                "PartName": f"/xl/drawings/drawing{drawing_id}.xml",
+                "ContentType": "application/vnd.openxmlformats-officedocument.drawing+xml",
+            },
+        )
+    for chart_id in range(1, chart_count + 1):
+        ET.SubElement(
+            root,
+            _qname(_CONTENT_TYPES_NS, "Override"),
+            {
+                "PartName": f"/xl/charts/chart{chart_id}.xml",
+                "ContentType": "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
+            },
+        )
     return _xml_bytes(root)
 
 
@@ -202,15 +260,16 @@ def workbook_xml(
     root = ET.Element(_qname(_MAIN_NS, "workbook"))
     sheet_elements = ET.SubElement(root, _qname(_MAIN_NS, "sheets"))
     for sheet_index, worksheet in enumerate(sheets):
-        ET.SubElement(
-            sheet_elements,
-            _qname(_MAIN_NS, "sheet"),
-            {
-                "name": worksheet.name,
-                "sheetId": str(sheet_index + 1),
-                _qname(_REL_NS, "id"): f"rId{sheet_index + 1}",
-            },
-        )
+        attributes = {
+            "name": worksheet.name,
+            "sheetId": str(sheet_index + 1),
+            _qname(_REL_NS, "id"): f"rId{sheet_index + 1}",
+        }
+        if worksheet.visibility == worksheet.HIDDEN:
+            attributes["state"] = "hidden"
+        elif worksheet.visibility == worksheet.VERY_HIDDEN:
+            attributes["state"] = "veryHidden"
+        ET.SubElement(sheet_elements, _qname(_MAIN_NS, "sheet"), attributes)
     defined_names = []
     for sheet_index, worksheet in enumerate(sheets):
         sheet_name = worksheet.name.replace("'", "''")
@@ -458,8 +517,250 @@ def table_xml(table: "Table", table_id: int) -> bytes:
     return _xml_bytes(root)
 
 
+def comments_xml(notes: Sequence[tuple[str, object]]) -> bytes:
+    """功能：生成一个工作表传统批注 comments XML 部件。
+
+    使用方法：XLSX 打包器为包含 ``Cell.note`` 的工作表调用。
+    参数：``notes`` 为按 A1 地址排序的 ``(地址, Note)`` 序列。
+    返回：可写入 ``xl/commentsN.xml`` 的 UTF-8 XML 字节串。
+    """
+    root = ET.Element(_qname(_MAIN_NS, "comments"))
+    authors: list[str] = []
+    for _address, note in notes:
+        if note.author not in authors:
+            authors.append(note.author)
+    author_list = ET.SubElement(root, _qname(_MAIN_NS, "authors"))
+    for author in authors:
+        ET.SubElement(author_list, _qname(_MAIN_NS, "author")).text = _escape_text(author)
+    comment_list = ET.SubElement(root, _qname(_MAIN_NS, "commentList"))
+    for address, note in notes:
+        comment = ET.SubElement(
+            comment_list,
+            _qname(_MAIN_NS, "comment"),
+            {"ref": address, "authorId": str(authors.index(note.author))},
+        )
+        text = ET.SubElement(comment, _qname(_MAIN_NS, "text"))
+        run = ET.SubElement(text, _qname(_MAIN_NS, "r"))
+        value = ET.SubElement(run, _qname(_MAIN_NS, "t"))
+        if note.text[:1].isspace() or note.text[-1:].isspace():
+            value.set(_XML_SPACE, "preserve")
+        value.text = _escape_text(note.text)
+    return _xml_bytes(root)
+
+
+def vml_comments_xml(notes: Sequence[tuple[str, object]]) -> bytes:
+    """功能：生成传统批注显示框所需的 VML 绘图部件。
+
+    使用方法：与 :func:`comments_xml` 成对写入 XLSX 包。
+    参数：``notes`` 为按 A1 地址排序的批注序列。
+    返回：可写入 ``xl/drawings/vmlDrawingN.vml`` 的 XML 字节串。
+    """
+    root = ET.Element("xml")
+    shape_type = ET.SubElement(
+        root,
+        _qname(_VML_NS, "shapetype"),
+        {"id": "_x0000_t202", "coordsize": "21600,21600", _qname(_OFFICE_NS, "spt"): "202", "path": "m,l,21600r21600,l21600,xe"},
+    )
+    ET.SubElement(shape_type, _qname(_VML_NS, "stroke"), {"joinstyle": "miter"})
+    ET.SubElement(shape_type, _qname(_VML_NS, "path"), {"gradientshapeok": "t", _qname(_OFFICE_NS, "connecttype"): "rect"})
+    for index, (address, _note) in enumerate(notes, 1):
+        row, column = cell_index(address)
+        shape = ET.SubElement(
+            root,
+            _qname(_VML_NS, "shape"),
+            {
+                "id": f"_x0000_s{1024 + index}",
+                "type": "#_x0000_t202",
+                "style": "position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:108pt;height:59.25pt;z-index:1;visibility:hidden",
+                "fillcolor": "#ffffe1",
+                _qname(_OFFICE_NS, "insetmode"): "auto",
+            },
+        )
+        ET.SubElement(shape, _qname(_VML_NS, "fill"), {"color2": "#ffffe1"})
+        ET.SubElement(shape, _qname(_VML_NS, "shadow"), {"on": "t", "color": "black", "obscured": "t"})
+        ET.SubElement(shape, _qname(_VML_NS, "path"), {_qname(_OFFICE_NS, "connecttype"): "none"})
+        textbox = ET.SubElement(shape, _qname(_VML_NS, "textbox"), {"style": "mso-direction-alt:auto"})
+        ET.SubElement(textbox, "div", {"style": "text-align:left"})
+        client_data = ET.SubElement(shape, _qname(_EXCEL_NS, "ClientData"), {"ObjectType": "Note"})
+        ET.SubElement(client_data, _qname(_EXCEL_NS, "MoveWithCells"))
+        ET.SubElement(client_data, _qname(_EXCEL_NS, "SizeWithCells"))
+        ET.SubElement(client_data, _qname(_EXCEL_NS, "AutoFill")).text = "False"
+        ET.SubElement(client_data, _qname(_EXCEL_NS, "Row")).text = str(row)
+        ET.SubElement(client_data, _qname(_EXCEL_NS, "Column")).text = str(column)
+    return _xml_bytes(root)
+
+
+def _chart_reference(worksheet: "Worksheet", address: str) -> str:
+    """功能：把图表区域地址转换为带工作表名称的绝对公式引用。"""
+    area = worksheet.range(address)
+    name = worksheet.name.replace("'", "''")
+    return (
+        f"'{name}'!${index_to_column(area.min_column)}${area.min_row + 1}:"
+        f"${index_to_column(area.max_column)}${area.max_row + 1}"
+    )
+
+
+def chart_xml(chart: object) -> bytes:
+    """功能：生成柱状、条形、折线或饼图的 ChartML 部件。
+
+    使用方法：XLSX 打包器为每个 ``Chart`` 调用。
+    参数：``chart`` 为绑定工作表、类型和系列的图表对象。
+    返回：可写入 ``xl/charts/chartN.xml`` 的 XML 字节串。
+    异常：图表没有数据系列时抛出 ``ValueError``。
+    """
+    if not chart.series:
+        raise ValueError("图表至少需要一个数据系列")
+    root = ET.Element(_qname(_CHART_NS, "chartSpace"))
+    chart_element = ET.SubElement(root, _qname(_CHART_NS, "chart"))
+    if chart.title:
+        title = ET.SubElement(chart_element, _qname(_CHART_NS, "title"))
+        tx = ET.SubElement(title, _qname(_CHART_NS, "tx"))
+        rich = ET.SubElement(tx, _qname(_CHART_NS, "rich"))
+        ET.SubElement(rich, _qname(_DRAWING_NS, "bodyPr"))
+        ET.SubElement(rich, _qname(_DRAWING_NS, "lstStyle"))
+        paragraph = ET.SubElement(rich, _qname(_DRAWING_NS, "p"))
+        run = ET.SubElement(paragraph, _qname(_DRAWING_NS, "r"))
+        ET.SubElement(run, _qname(_DRAWING_NS, "t")).text = _escape_text(chart.title)
+        ET.SubElement(title, _qname(_CHART_NS, "layout"))
+    plot_area = ET.SubElement(chart_element, _qname(_CHART_NS, "plotArea"))
+    ET.SubElement(plot_area, _qname(_CHART_NS, "layout"))
+    chart_name = {"column": "barChart", "bar": "barChart", "line": "lineChart", "pie": "pieChart"}[chart.type]
+    plot = ET.SubElement(plot_area, _qname(_CHART_NS, chart_name))
+    if chart.type in {"column", "bar"}:
+        ET.SubElement(plot, _qname(_CHART_NS, "barDir"), {"val": "col" if chart.type == "column" else "bar"})
+        ET.SubElement(plot, _qname(_CHART_NS, "grouping"), {"val": "clustered"})
+    if chart.type == "line":
+        ET.SubElement(plot, _qname(_CHART_NS, "grouping"), {"val": "standard"})
+    for index, series in enumerate(chart.series):
+        series_element = ET.SubElement(plot, _qname(_CHART_NS, "ser"))
+        ET.SubElement(series_element, _qname(_CHART_NS, "idx"), {"val": str(index)})
+        ET.SubElement(series_element, _qname(_CHART_NS, "order"), {"val": str(index)})
+        if series.name:
+            tx = ET.SubElement(series_element, _qname(_CHART_NS, "tx"))
+            ET.SubElement(tx, _qname(_CHART_NS, "v")).text = _escape_text(series.name)
+        if series.categories:
+            category = ET.SubElement(series_element, _qname(_CHART_NS, "cat"))
+            reference = ET.SubElement(category, _qname(_CHART_NS, "strRef"))
+            ET.SubElement(reference, _qname(_CHART_NS, "f")).text = _chart_reference(chart.worksheet, series.categories)
+        value = ET.SubElement(series_element, _qname(_CHART_NS, "val"))
+        reference = ET.SubElement(value, _qname(_CHART_NS, "numRef"))
+        ET.SubElement(reference, _qname(_CHART_NS, "f")).text = _chart_reference(chart.worksheet, series.values)
+    if chart.type != "pie":
+        ET.SubElement(plot, _qname(_CHART_NS, "axId"), {"val": "48650112"})
+        ET.SubElement(plot, _qname(_CHART_NS, "axId"), {"val": "48672768"})
+        category_axis = ET.SubElement(plot_area, _qname(_CHART_NS, "catAx"))
+        ET.SubElement(category_axis, _qname(_CHART_NS, "axId"), {"val": "48650112"})
+        ET.SubElement(category_axis, _qname(_CHART_NS, "scaling"))
+        ET.SubElement(category_axis, _qname(_CHART_NS, "delete"), {"val": "0"})
+        ET.SubElement(category_axis, _qname(_CHART_NS, "axPos"), {"val": "b"})
+        ET.SubElement(category_axis, _qname(_CHART_NS, "crossAx"), {"val": "48672768"})
+        value_axis = ET.SubElement(plot_area, _qname(_CHART_NS, "valAx"))
+        ET.SubElement(value_axis, _qname(_CHART_NS, "axId"), {"val": "48672768"})
+        ET.SubElement(value_axis, _qname(_CHART_NS, "scaling"))
+        ET.SubElement(value_axis, _qname(_CHART_NS, "delete"), {"val": "0"})
+        ET.SubElement(value_axis, _qname(_CHART_NS, "axPos"), {"val": "l"})
+        ET.SubElement(value_axis, _qname(_CHART_NS, "crossAx"), {"val": "48650112"})
+    if chart.legend.position != "none":
+        legend = ET.SubElement(chart_element, _qname(_CHART_NS, "legend"))
+        position = {"bottom": "b", "top": "t", "left": "l", "right": "r"}[chart.legend.position]
+        ET.SubElement(legend, _qname(_CHART_NS, "legendPos"), {"val": position})
+        ET.SubElement(legend, _qname(_CHART_NS, "layout"))
+    ET.SubElement(chart_element, _qname(_CHART_NS, "plotVisOnly"), {"val": "1"})
+    return _xml_bytes(root)
+
+
+def drawing_xml(
+    images: Sequence[tuple[int, object]], charts: Sequence[tuple[int, object]]
+) -> bytes:
+    """功能：生成承载图片和图表的一张工作表 DrawingML 部件。
+
+    使用方法：XLSX 打包器为包含图片或图表的工作表调用。
+    参数：``images`` 为 ``(全局图片编号, Image)`` 序列；``charts`` 为
+    ``(全局图表编号, Chart)`` 序列。
+    返回：可写入 ``xl/drawings/drawingN.xml`` 的 XML 字节串。
+    """
+    root = ET.Element(_qname(_SPREADSHEET_DRAWING_NS, "wsDr"))
+    relationship_id = 1
+    object_id = 1
+    for image_id, image in images:
+        row, column = cell_index(image.anchor)
+        anchor = ET.SubElement(root, _qname(_SPREADSHEET_DRAWING_NS, "oneCellAnchor"))
+        start = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "from"))
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "col")).text = str(column)
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "colOff")).text = str(int(image.offset_x) * 9525)
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "row")).text = str(row)
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "rowOff")).text = str(int(image.offset_y) * 9525)
+        ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "ext"), {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)})
+        picture = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "pic"))
+        non_visual = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "nvPicPr"))
+        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPr"), {"id": str(object_id), "name": f"图片 {object_id}", "descr": image.alt_text})
+        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPicPr"))
+        blip_fill = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "blipFill"))
+        ET.SubElement(blip_fill, _qname(_DRAWING_NS, "blip"), {_qname(_REL_NS, "embed"): f"rId{relationship_id}"})
+        stretch = ET.SubElement(blip_fill, _qname(_DRAWING_NS, "stretch"))
+        ET.SubElement(stretch, _qname(_DRAWING_NS, "fillRect"))
+        shape_properties = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "spPr"))
+        transform = ET.SubElement(shape_properties, _qname(_DRAWING_NS, "xfrm"))
+        ET.SubElement(transform, _qname(_DRAWING_NS, "off"), {"x": "0", "y": "0"})
+        ET.SubElement(transform, _qname(_DRAWING_NS, "ext"), {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)})
+        geometry = ET.SubElement(shape_properties, _qname(_DRAWING_NS, "prstGeom"), {"prst": "rect"})
+        ET.SubElement(geometry, _qname(_DRAWING_NS, "avLst"))
+        ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "clientData"))
+        relationship_id += 1
+        object_id += 1
+    for chart_id, chart in charts:
+        row, column = cell_index(chart.anchor)
+        anchor = ET.SubElement(root, _qname(_SPREADSHEET_DRAWING_NS, "oneCellAnchor"))
+        start = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "from"))
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "col")).text = str(column)
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "colOff")).text = "0"
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "row")).text = str(row)
+        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "rowOff")).text = "0"
+        ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "ext"), {"cx": str(int(chart.width * 914400)), "cy": str(int(chart.height * 914400))})
+        frame = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "graphicFrame"))
+        non_visual = ET.SubElement(frame, _qname(_SPREADSHEET_DRAWING_NS, "nvGraphicFramePr"))
+        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPr"), {"id": str(object_id), "name": f"图表 {object_id}"})
+        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvGraphicFramePr"))
+        transform = ET.SubElement(frame, _qname(_SPREADSHEET_DRAWING_NS, "xfrm"))
+        ET.SubElement(transform, _qname(_DRAWING_NS, "off"), {"x": "0", "y": "0"})
+        ET.SubElement(transform, _qname(_DRAWING_NS, "ext"), {"cx": str(int(chart.width * 914400)), "cy": str(int(chart.height * 914400))})
+        graphic = ET.SubElement(frame, _qname(_DRAWING_NS, "graphic"))
+        graphic_data = ET.SubElement(graphic, _qname(_DRAWING_NS, "graphicData"), {"uri": _CHART_NS})
+        ET.SubElement(graphic_data, _qname(_CHART_NS, "chart"), {_qname(_REL_NS, "id"): f"rId{relationship_id}"})
+        ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "clientData"))
+        relationship_id += 1
+        object_id += 1
+    return _xml_bytes(root)
+
+
+def drawing_rels_xml(
+    images: Sequence[tuple[int, object]], charts: Sequence[tuple[int, object]]
+) -> bytes:
+    """功能：生成 DrawingML 到图片和图表部件的关系清单。"""
+    root = ET.Element(_qname(_PACKAGE_REL_NS, "Relationships"))
+    relationship_id = 1
+    for image_id, image in images:
+        ET.SubElement(root, _qname(_PACKAGE_REL_NS, "Relationship"), {
+            "Id": f"rId{relationship_id}",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+            "Target": f"../media/image{image_id}.{image.format}",
+        })
+        relationship_id += 1
+    for chart_id, _chart in charts:
+        ET.SubElement(root, _qname(_PACKAGE_REL_NS, "Relationship"), {
+            "Id": f"rId{relationship_id}",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+            "Target": f"../charts/chart{chart_id}.xml",
+        })
+        relationship_id += 1
+    return _xml_bytes(root)
+
+
 def worksheet_rels(
-    table_ids: Sequence[int] = (), hyperlink_targets: Sequence[str] = ()
+    table_ids: Sequence[int] = (),
+    hyperlink_targets: Sequence[str] = (),
+    note_id: Optional[int] = None,
+    drawing_id: Optional[int] = None,
 ) -> bytes:
     """功能：生成单张工作表到超链接和数据表部件的关系清单。
 
@@ -497,6 +798,25 @@ def worksheet_rels(
                 "Target": f"../tables/table{table_id}.xml",
             },
         )
+    relationship_offset += len(table_ids)
+    if note_id is not None:
+        ET.SubElement(root, _qname(_PACKAGE_REL_NS, "Relationship"), {
+            "Id": f"rId{relationship_offset + 1}",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
+            "Target": f"../comments{note_id}.xml",
+        })
+        ET.SubElement(root, _qname(_PACKAGE_REL_NS, "Relationship"), {
+            "Id": f"rId{relationship_offset + 2}",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing",
+            "Target": f"../drawings/vmlDrawing{note_id}.vml",
+        })
+        relationship_offset += 2
+    if drawing_id is not None:
+        ET.SubElement(root, _qname(_PACKAGE_REL_NS, "Relationship"), {
+            "Id": f"rId{relationship_offset + 1}",
+            "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing",
+            "Target": f"../drawings/drawing{drawing_id}.xml",
+        })
     return _xml_bytes(root)
 
 
@@ -505,13 +825,16 @@ def sheet_xml(
     style_registry: Optional[StyleRegistry] = None,
     table_ids: Sequence[int] = (),
     hyperlink_count: int = 0,
+    note_rel_id: Optional[int] = None,
+    drawing_rel_id: Optional[int] = None,
 ) -> bytes:
     """功能：生成单张工作表的完整 SpreadsheetML XML。
 
     使用方法：由 :class:`XlsxWriter` 对工作簿中的每张工作表调用。
     参数：``sheet`` 为待写出的工作表；``style_registry`` 为工作簿共享样式注册器，
     省略时为当前单表临时创建；``table_ids`` 为本表数据表对应的全局1-based编号；
-    ``hyperlink_count`` 为本表外部超链接关系数量。
+    ``hyperlink_count`` 为本表外部超链接关系数量；``note_rel_id``、
+    ``drawing_rel_id`` 分别为传统批注 VML 和 DrawingML 关系编号。
     普通值、公式和样式按0-based行列索引合并排序。
     返回：包含精确数据边界和 ``sheetData`` 的 UTF-8 XML 字节串。
     """
@@ -528,6 +851,10 @@ def sheet_xml(
                 _qname(_MAIN_NS, "tabColor"),
                 {"rgb": sheet.color},
             )
+        if fit_mode:
+            ET.SubElement(
+                properties, _qname(_MAIN_NS, "pageSetUpPr"), {"fitToPage": "1"}
+            )
     if sheet.protection.enabled:
         protection_attributes = {}
         if sheet.protection.password:
@@ -537,10 +864,6 @@ def sheet_xml(
         if not sheet.protection.select_unlocked:
             protection_attributes["selectUnlockedCells"] = "0"
         ET.SubElement(root, _qname(_MAIN_NS, "sheetProtection"), protection_attributes)
-        if fit_mode:
-            ET.SubElement(
-                properties, _qname(_MAIN_NS, "pageSetUpPr"), {"fitToPage": "1"}
-            )
     if style_registry is None:
         style_registry = StyleRegistry([sheet])
     values = dict(sheet._values.items())
@@ -684,6 +1007,11 @@ def sheet_xml(
             if link.tooltip is not None:
                 attributes["tooltip"] = link.tooltip
             ET.SubElement(hyperlinks, _qname(_MAIN_NS, "hyperlink"), attributes)
+
+    if drawing_rel_id is not None:
+        ET.SubElement(root, _qname(_MAIN_NS, "drawing"), {_qname(_REL_NS, "id"): f"rId{drawing_rel_id}"})
+    if note_rel_id is not None:
+        ET.SubElement(root, _qname(_MAIN_NS, "legacyDrawing"), {_qname(_REL_NS, "id"): f"rId{note_rel_id}"})
 
     if sheet.validations:
         validations = ET.SubElement(
@@ -910,7 +1238,17 @@ class XlsxWriter:
                 style_registry = StyleRegistry(sheets)
                 table_entries = []
                 sheet_table_ids = {}
+                note_entries = []
+                sheet_note_ids = {}
+                drawing_entries = []
+                sheet_drawing_ids = {}
+                image_entries = []
+                chart_entries = []
                 next_table_id = 1
+                next_note_id = 1
+                next_drawing_id = 1
+                next_image_id = 1
+                next_chart_id = 1
                 for sheet_index, worksheet in enumerate(sheets):
                     current_ids = []
                     for table in worksheet.tables:
@@ -918,9 +1256,35 @@ class XlsxWriter:
                         table_entries.append((next_table_id, table))
                         next_table_id += 1
                     sheet_table_ids[sheet_index] = tuple(current_ids)
+                    notes = tuple(
+                        (cell_address(row, column), note)
+                        for (row, column), note in sorted(worksheet._notes.items())
+                    )
+                    if notes:
+                        sheet_note_ids[sheet_index] = next_note_id
+                        note_entries.append((next_note_id, notes))
+                        next_note_id += 1
+                    images = []
+                    for image in worksheet.images:
+                        images.append((next_image_id, image))
+                        image_entries.append((next_image_id, image))
+                        next_image_id += 1
+                    charts = []
+                    for chart in worksheet.charts:
+                        charts.append((next_chart_id, chart))
+                        chart_entries.append((next_chart_id, chart))
+                        next_chart_id += 1
+                    if images or charts:
+                        sheet_drawing_ids[sheet_index] = next_drawing_id
+                        drawing_entries.append((next_drawing_id, tuple(images), tuple(charts)))
+                        next_drawing_id += 1
                 package.writestr(
                     "[Content_Types].xml",
-                    content_types(len(sheets), len(table_entries)),
+                    content_types(
+                        len(sheets), len(table_entries), len(note_entries),
+                        len(drawing_entries), len(chart_entries),
+                        tuple(image.format for _image_id, image in image_entries),
+                    ),
                 )
                 package.writestr("_rels/.rels", _root_rels())
                 package.writestr(
@@ -935,6 +1299,8 @@ class XlsxWriter:
                 package.writestr("xl/styles.xml", style_registry.xml())
                 for sheet_index, worksheet in enumerate(sheets):
                     table_ids = sheet_table_ids[sheet_index]
+                    note_id = sheet_note_ids.get(sheet_index)
+                    drawing_id = sheet_drawing_ids.get(sheet_index)
                     hyperlink_targets = tuple(
                         link.target
                         for _address, link in worksheet.hyperlinks
@@ -947,18 +1313,42 @@ class XlsxWriter:
                             style_registry,
                             table_ids,
                             len(hyperlink_targets),
+                            (len(hyperlink_targets) + len(table_ids) + 2) if note_id is not None else None,
+                            (
+                                len(hyperlink_targets) + len(table_ids)
+                                + (2 if note_id is not None else 0) + 1
+                            ) if drawing_id is not None else None,
                         ),
                     )
-                    if table_ids or hyperlink_targets:
+                    if table_ids or hyperlink_targets or note_id is not None or drawing_id is not None:
                         package.writestr(
                             f"xl/worksheets/_rels/sheet{sheet_index + 1}.xml.rels",
-                            worksheet_rels(table_ids, hyperlink_targets),
+                            worksheet_rels(table_ids, hyperlink_targets, note_id, drawing_id),
                         )
                 for table_id, table in table_entries:
                     package.writestr(
                         f"xl/tables/table{table_id}.xml",
                         table_xml(table, table_id),
                     )
+                for note_id, notes in note_entries:
+                    package.writestr(f"xl/comments{note_id}.xml", comments_xml(notes))
+                    package.writestr(
+                        f"xl/drawings/vmlDrawing{note_id}.vml", vml_comments_xml(notes)
+                    )
+                for drawing_id, images, charts in drawing_entries:
+                    package.writestr(
+                        f"xl/drawings/drawing{drawing_id}.xml", drawing_xml(images, charts)
+                    )
+                    package.writestr(
+                        f"xl/drawings/_rels/drawing{drawing_id}.xml.rels",
+                        drawing_rels_xml(images, charts),
+                    )
+                for image_id, image in image_entries:
+                    package.writestr(
+                        f"xl/media/image{image_id}.{image.format}", Path(image.filename).read_bytes()
+                    )
+                for chart_id, chart in chart_entries:
+                    package.writestr(f"xl/charts/chart{chart_id}.xml", chart_xml(chart))
             os.replace(temporary_name, target)
             temporary_name = None
         finally:

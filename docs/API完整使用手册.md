@@ -1,6 +1,6 @@
-# ExcelKit 0.5.0 完整中文使用与 API 手册
+# ExcelKit 0.6.0 完整中文使用与 API 手册
 
-版本：0.5.0
+版本：0.6.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,7 +8,7 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.5.0-py3-none-any.whl
+pip install excelkit-0.6.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -32,6 +32,10 @@ from excelkit.validation import Validation
 from excelkit.conditional import ConditionalFormat
 from excelkit.filter import AutoFilter
 from excelkit.protection import Protection
+from excelkit.chart import Chart, ChartLegend, ChartSeries, ChartType
+from excelkit.image import Image
+from excelkit.note import Note
+from excelkit.sort import SortKey
 ```
 
 ## 2. 必须先了解的索引规则
@@ -57,7 +61,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 新增功能速查
+## 3.1 0.5.0 与 0.6.0 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -136,7 +140,7 @@ ws.auto_filter.add(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.5.0"
+assert excelkit.__version__ == "0.6.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -396,7 +400,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.5.0 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.6.0 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -2462,14 +2466,136 @@ worksheet.auto_filter.range = "A1:D100"
 worksheet.auto_filter.add(2, ["通过", "待审核"])
 ```
 
-## 16. 0.5.0 能力边界
+## 15.2 0.6.0 可视化、排序与公式 API
 
-0.5.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
-公式表达式恢复、页眉页脚图片、普通图片、图表、
+### `Worksheet.add_chart(chart_type, *, anchor)` / `charts`
+
+功能：在工作表中创建可写入 `.xlsx` 的基础图表。`chart_type` 必须使用
+`ChartType.COLUMN`、`ChartType.BAR`、`ChartType.LINE`、`ChartType.PIE` 之一；
+`anchor` 为图表左上角的单个 A1 地址。返回新的 `Chart`，`charts` 返回该表图表的
+只读元组。图表需要至少添加一个系列才能保存。
+
+```python
+from excelkit.chart import ChartType
+
+chart = worksheet.add_chart(ChartType.COLUMN, anchor="E2")
+chart.title = "月度销售"
+chart.width = 16       # 英寸
+chart.height = 9       # 英寸
+chart.legend.position = chart.legend.BOTTOM
+chart.add_series(values="B2:B13", categories="A2:A13", name="销售额")
+```
+
+`Chart.add_series(*, values, categories=None, name=None)` 的 `values` 是必填 A1 区域；
+`categories` 是可选分类区域，元素数量必须与数据区域一致；`name` 是可选非空系列名。
+方法返回当前 `Chart`。`Chart.remove()` 删除图表并返回所属工作表。图例位置可使用
+`ChartLegend.BOTTOM`、`TOP`、`LEFT`、`RIGHT`、`NONE`。
+
+### `Worksheet.add_image(filename, *, anchor)` / `images`
+
+功能：在工作表中添加 PNG 或 JPEG 图片。`filename` 是现有图片路径，`anchor` 是图片
+左上角的单个 A1 地址；返回 `Image`，`images` 返回只读元组。图片尺寸由原文件像素
+自动读取，随后可修改 `width`、`height`、`offset_x`、`offset_y` 和 `alt_text`；前四项
+均为像素。`Image.remove()` 删除图片并返回所属工作表。
+
+```python
+image = worksheet.add_image("logo.png", anchor="A1")
+image.width = 160
+image.height = 80
+image.offset_x = 8
+image.offset_y = 6
+image.alt_text = "公司 Logo"
+```
+
+图表和图片当前写入 XLSX；加载已有 XLSX 时不会重建为 ExcelKit 对象，保存后也不会
+保留从外部文件读取到、但未由 ExcelKit 创建的图表或图片。`.xls` 不支持它们。
+
+### `Cell.note`
+
+功能：读取、设置和清除传统 Excel 批注。属性接受 `Note`、字符串或 `None`；字符串
+默认作者为 `ExcelKit`，`None` 清除批注。`Note(text, author="ExcelKit")` 的正文和作者
+必须为非空字符串。批注支持 XLSX 读写，不支持 XLS。
+
+```python
+from excelkit.note import Note
+
+worksheet["B2"].note = "请复核此成绩"
+worksheet["B3"].note = Note("由财务部确认", author="财务部")
+print(worksheet["B3"].note.text, worksheet["B3"].note.author)
+worksheet["B2"].note = None
+```
+
+### `Worksheet.sort(address, *, keys, has_header=False)` / `SortKey`
+
+功能：在内存中对连续矩形区域的行排序，同时移动该区域内的值、公式、样式、超链接和
+批注。`address` 是排序区域，`keys` 为非空 `SortKey` 可迭代对象，`has_header=True`
+表示区域首行保持不动。包含任何合并单元格的排序区域会抛出 `ValueError`。
+
+`SortKey(column, descending=False)` 中的 `column` 是**相对于排序区域左侧**的 0-based
+列偏移，`descending=True` 表示降序。
+
+```python
+from excelkit.sort import SortKey
+
+worksheet.sort(
+    "A2:D100",
+    keys=[SortKey(1, descending=True), SortKey(0)],
+)
+```
+
+### `AutoFilter.apply()`
+
+功能：根据 `auto_filter.add()` 已登记的值条件，将筛选区域内不匹配的数据行设为隐藏。
+调用前必须设置 `worksheet.auto_filter.range`；列号相对于筛选区域且从 0 开始。没有
+筛选条件时会取消筛选区域数据行的隐藏状态；`auto_filter.clear()` 会清除区域、条件并
+恢复工作表中已创建行的可见状态。
+
+```python
+worksheet.auto_filter.range = "A1:C100"
+worksheet.auto_filter.add(2, ["通过"])
+worksheet.auto_filter.apply()
+```
+
+### `Worksheet.visibility`
+
+功能：控制工作表的可见性。读取时返回字符串常量；设置时使用 `Worksheet.VISIBLE`、
+`Worksheet.HIDDEN`、`Worksheet.VERY_HIDDEN`。普通隐藏可以通过 Excel/WPS 常规界面
+恢复；非常隐藏通常需要高级编辑工具恢复。该属性支持 XLSX 读写。
+
+```python
+from excelkit import Worksheet
+
+worksheet.visibility = Worksheet.HIDDEN
+worksheet.visibility = Worksheet.VERY_HIDDEN
+worksheet.visibility = Worksheet.VISIBLE
+```
+
+### 扩展 `Workbook.calculate()` 公式函数
+
+除已有基础算术、比较、`SUM`、`AVERAGE`、`MIN`、`MAX`、文本和逻辑函数外，0.6.0
+新增：`SUMIF`、`COUNTIF`、`AVERAGEIF`、`IFERROR`、`ROUNDUP`、`ROUNDDOWN`、
+`DATE`、`YEAR`、`MONTH`、`DAY`、`TODAY`、`NOW`、`VLOOKUP`、`HLOOKUP`、`XLOOKUP`。
+
+`XLOOKUP(lookup_value, lookup_array, return_array, if_not_found=None)` 当前实现精确匹配；
+查找区域与返回区域元素数量必须一致。命名区域可直接用于公式，例如
+`=SUM(SalesAmount)`。这些函数由 `Workbook.calculate()` 计算并写入 `cached_value`；
+保存后的 Excel/WPS 仍会按自己的完整公式引擎重新计算。
+
+```python
+workbook.add_named_range("SalesAmount", worksheet.range("B2:B13"))
+worksheet["D2"].formula = "=SUM(SalesAmount)"
+worksheet["D3"].formula = "=XLOOKUP(A3,A2:A13,B2:B13,0)"
+workbook.calculate(strict=True)
+```
+
+## 16. 0.6.0 能力边界
+
+0.6.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.5.0
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.6.0
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2499,13 +2625,13 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.5.0 API 速查表
+## 18. 0.6.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`show_gridlines`、`page`、`protection`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
-| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |
 | `NamedRange` | `name`、`worksheet`、`range` |
@@ -2519,6 +2645,10 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 | `excelkit.conditional` | `ConditionalFormat` |
 | `excelkit.filter` | `AutoFilter` |
 | `excelkit.protection` | `Protection` |
+| `excelkit.chart` | `Chart`、`ChartSeries`、`ChartLegend`、`ChartType` |
+| `excelkit.image` | `Image` |
+| `excelkit.note` | `Note` |
+| `excelkit.sort` | `SortKey` |
 
 0.3.0 起顶层仅保留核心对象；样式、页面、地址和异常分别从 `excelkit.style`、
 `excelkit.page_setup`、`excelkit.address` 和 `excelkit.errors` 导入。`label`、

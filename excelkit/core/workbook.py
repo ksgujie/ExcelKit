@@ -359,6 +359,7 @@ class Workbook:
             "formula_values": deepcopy(source._formula_values),
             "formula_errors": dict(source._formula_errors),
             "hyperlinks": dict(source._hyperlinks),
+            "notes": dict(source._notes),
             "styles": dict(source._styles),
             "merged_ranges": list(source._merged_ranges),
             "rows": deepcopy(source._rows),
@@ -370,11 +371,13 @@ class Workbook:
         }
         target = self.add_sheet(new_name)
         target._color = source._color
+        target._visibility = source._visibility
         target._values._values = copied_state["values"]
         target._formulas = copied_state["formulas"]
         target._formula_values = copied_state["formula_values"]
         target._formula_errors = copied_state["formula_errors"]
         target._hyperlinks = copied_state["hyperlinks"]
+        target._notes = copied_state["notes"]
         target._headers = copied_state["headers"]
         target._validations = copied_state["validations"]
         target._conditionals = copied_state["conditionals"]
@@ -394,7 +397,7 @@ class Workbook:
         target._max_row = source._max_row
         target._max_column = source._max_column
         for table in source.tables:
-            target.add_table(
+            copied_table = target.add_table(
                 table.range.address,
                 name=self._unique_table_name(table.name),
                 style=table.style,
@@ -402,6 +405,27 @@ class Workbook:
                 show_row_stripes=table.show_row_stripes,
                 show_column_stripes=table.show_column_stripes,
             )
+            copied_table.show_totals = table.show_totals
+            copied_table.totals.update(table.totals)
+        for image in source.images:
+            copied_image = target.add_image(image.filename, anchor=image.anchor)
+            copied_image.width = image.width
+            copied_image.height = image.height
+            copied_image.offset_x = image.offset_x
+            copied_image.offset_y = image.offset_y
+            copied_image.alt_text = image.alt_text
+        for chart in source.charts:
+            copied_chart = target.add_chart(chart.type, anchor=chart.anchor)
+            copied_chart.title = chart.title
+            copied_chart.width = chart.width
+            copied_chart.height = chart.height
+            copied_chart.legend.position = chart.legend.position
+            for series in chart.series:
+                copied_chart.add_series(
+                    values=series.values,
+                    categories=series.categories,
+                    name=series.name,
+                )
         return target
 
     @property

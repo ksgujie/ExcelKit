@@ -24,6 +24,7 @@ _REFERENCE_PATTERN = re.compile(
     r"(?![\w.])"
 )
 _STRING_PATTERN = re.compile(r'"(?:[^"]|"")*"')
+_NAME_PATTERN = re.compile(r"(?<![\w.])([A-Za-z_\u0080-\uffff][\w.\u0080-\uffff]*)(?![\w.])")
 
 
 def formula_dependencies(workbook: "Workbook", worksheet: "Worksheet", formula: str) -> tuple[Any, ...]:
@@ -252,6 +253,204 @@ def _round(value: Any, digits: int = 0) -> float | int:
     return int(result) if digits <= 0 else float(result)
 
 
+def _round_direction(value: Any, digits: int, *, up: bool) -> float | int:
+    """功能：按远离零或接近零方向进行 Excel 风格数值舍入。
+
+    使用方法：分别由 ``ROUNDUP`` 与 ``ROUNDDOWN`` 公式函数调用。
+    参数：``value`` 为有限数值；``digits`` 为可正可负的整数；``up`` 为真时远离零。
+    返回：舍入后的整数或浮点数。
+    异常：参数类型或取值无效时抛出 ``FormulaCalculationError``。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise FormulaCalculationError("舍入的值必须是数值")
+    if isinstance(digits, bool) or not isinstance(digits, int):
+        raise FormulaCalculationError("舍入位数必须是整数")
+    factor = 10 ** digits
+    scaled = float(value) * factor
+    rounded = math.ceil(abs(scaled)) if up else math.floor(abs(scaled))
+    result = math.copysign(rounded / factor, scaled)
+    return int(result) if digits <= 0 else result
+
+
+def _criterion_matches(value: Any, criterion: Any) -> bool:
+    """功能：按常见 Excel 条件表达式判断一个值是否匹配。
+
+    使用方法：由 ``SUMIF``、``COUNTIF``、``AVERAGEIF`` 内部调用。
+    参数：``value`` 为待判断值；``criterion`` 为文本、数值或含 ``>=`` 等运算符的条件。
+    返回：匹配时返回 ``True``。
+    """
+    if not isinstance(criterion, str):
+        return value == criterion
+    match = re.match(r"^(<=|>=|<>|=|<|>)(.*)$", criterion)
+    if match is None:
+        return str(value) == criterion
+    operator, expected = match.groups()
+    try:
+        comparison_value: Any = float(expected)
+        actual: Any = float(value)
+    except (TypeError, ValueError):
+        comparison_value = expected
+        actual = "" if value is None else str(value)
+    return {
+        "=": actual == comparison_value,
+        "<>": actual != comparison_value,
+        ">": actual > comparison_value,
+        ">=": actual >= comparison_value,
+        "<": actual < comparison_value,
+        "<=": actual <= comparison_value,
+    }[operator]
+
+
+def _conditional_values(criteria_range: Any, criterion: Any, sum_range: Any = None) -> list[Any]:
+    """功能：按条件区域筛选对应数据区域的值。
+
+    使用方法：由条件聚合函数内部调用。
+    参数：``criteria_range`` 为区域或序列；``criterion`` 为条件；``sum_range`` 为可选
+    的同长度目标区域，省略时使用条件区域本身。
+    返回：所有匹配位置的目标值列表。
+    异常：区域元素数不一致时抛出 ``FormulaCalculationError``。
+    """
+    criteria = _flatten([criteria_range])
+    target = _flatten([criteria_range if sum_range is None else sum_range])
+    if len(criteria) != len(target):
+        raise FormulaCalculationError("条件区域与目标区域大小必须一致")
+    return [target[index] for index, value in enumerate(criteria) if _criterion_matches(value, criterion)]
+
+
+def _sumif(criteria_range: Any, criterion: Any, sum_range: Any = None) -> float | int:
+    """功能：对满足条件的位置求和。
+
+    使用方法：公式 ``=SUMIF(A1:A10,\">0\",B1:B10)``。
+    参数：``criteria_range`` 为条件区域；``criterion`` 为 Excel 条件；``sum_range``
+    为可选的同尺寸求和区域。
+    返回：匹配位置中有效数值的总和；没有匹配数值时返回 ``0``。
+    """
+    return sum(_numbers(_conditional_values(criteria_range, criterion, sum_range)))
+
+
+def _countif(criteria_range: Any, criterion: Any) -> int:
+    """功能：统计满足条件的位置数量。
+
+    使用方法：公式 ``=COUNTIF(A1:A10,\"通过\")``。
+    参数：``criteria_range`` 为条件区域；``criterion`` 为 Excel 条件。
+    返回：满足条件的元素数量。
+    """
+    return len(_conditional_values(criteria_range, criterion))
+
+
+def _averageif(criteria_range: Any, criterion: Any, average_range: Any = None) -> float:
+    """功能：计算满足条件位置的数值平均值。
+
+    使用方法：公式 ``=AVERAGEIF(A1:A10,\">0\")``。
+    参数：``criteria_range`` 为条件区域；``criterion`` 为 Excel 条件；
+    ``average_range`` 为可选的同尺寸目标区域。
+    返回：匹配位置有效数值的浮点平均值。
+    异常：没有可计算的数值时抛出 ``FormulaCalculationError``。
+    """
+    values = _numbers(_conditional_values(criteria_range, criterion, average_range))
+    if not values:
+        raise FormulaCalculationError("AVERAGEIF 没有可计算的数值")
+    return sum(values) / len(values)
+
+
+def _date(year: int, month: int, day: int) -> date:
+    """功能：按年、月、日构造日期。
+
+    使用方法：公式 ``=DATE(2026,8,1)``。
+    参数：``year``、``month``、``day`` 均为整数日期分量。
+    返回：对应的 ``date`` 对象。
+    异常：类型或日期无效时抛出 ``FormulaCalculationError``。
+    """
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in (year, month, day)):
+        raise FormulaCalculationError("DATE 的年、月、日必须是整数")
+    try:
+        return date(year, month, day)
+    except ValueError as error:
+        raise FormulaCalculationError(str(error)) from error
+
+
+def _lookup_vector(value: Any, vector: Any, return_vector: Any, if_not_found: Any = None) -> Any:
+    """功能：在一维查找向量中精确匹配并返回同位置结果。
+
+    使用方法：由 ``XLOOKUP`` 内部调用。
+    参数：``value`` 为目标；``vector`` 和 ``return_vector`` 为同长度区域；
+    ``if_not_found`` 为未找到的返回值。
+    返回：匹配项对应的返回值或未找到值。
+    异常：向量长度不一致时抛出 ``FormulaCalculationError``。
+    """
+    lookup = _flatten([vector])
+    results = _flatten([return_vector])
+    if len(lookup) != len(results):
+        raise FormulaCalculationError("XLOOKUP 查找区域和返回区域大小必须一致")
+    for index, item in enumerate(lookup):
+        if item == value:
+            return results[index]
+    if if_not_found is not None:
+        return if_not_found
+    raise FormulaCalculationError("XLOOKUP 未找到匹配项")
+
+
+def _vlookup(value: Any, table: Any, column_index: int, approximate: bool = True) -> Any:
+    """功能：在二维区域首列中查找并返回指定 1-based 列的值。
+
+    使用方法：公式 ``=VLOOKUP(A1,D2:F10,2,FALSE)``。
+    参数：``value`` 为查找值；``table`` 为二维区域；``column_index`` 为 Excel
+    1-based 返回列序号；``approximate`` 为是否允许近似匹配。
+    返回：匹配行中指定列的值。
+    异常：索引、区域或查找结果无效时抛出 ``FormulaCalculationError``。
+    """
+    if isinstance(column_index, bool) or not isinstance(column_index, int) or column_index < 1:
+        raise FormulaCalculationError("VLOOKUP 的列索引必须是正整数")
+    rows = table if isinstance(table, list) else [table]
+    selected = None
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < column_index:
+            raise FormulaCalculationError("VLOOKUP 区域或列索引无效")
+        if row[0] == value:
+            return row[column_index - 1]
+        if approximate and row[0] <= value:
+            selected = row
+    if selected is not None:
+        return selected[column_index - 1]
+    raise FormulaCalculationError("VLOOKUP 未找到匹配项")
+
+
+def _hlookup(value: Any, table: Any, row_index: int, approximate: bool = True) -> Any:
+    """功能：在二维区域首行中查找并返回指定 1-based 行的值。
+
+    使用方法：公式 ``=HLOOKUP(A1,B1:E3,2,FALSE)``。
+    参数：``value`` 为查找值；``table`` 为二维区域；``row_index`` 为 Excel
+    1-based 返回行序号；``approximate`` 为是否允许近似匹配。
+    返回：匹配列中指定行的值。
+    异常：索引、区域或查找结果无效时抛出 ``FormulaCalculationError``。
+    """
+    if isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 1:
+        raise FormulaCalculationError("HLOOKUP 的行索引必须是正整数")
+    if not isinstance(table, list) or len(table) < row_index or not table:
+        raise FormulaCalculationError("HLOOKUP 区域或行索引无效")
+    header = table[0]
+    selected = None
+    for column, item in enumerate(header):
+        if item == value:
+            return table[row_index - 1][column]
+        if approximate and item <= value:
+            selected = column
+    if selected is not None:
+        return table[row_index - 1][selected]
+    raise FormulaCalculationError("HLOOKUP 未找到匹配项")
+
+
+def _date_error(name: str, value: Any) -> Any:
+    """功能：为日期拆分函数生成统一的参数类型错误。
+
+    使用方法：由 ``YEAR``、``MONTH``、``DAY`` 内部调用。
+    参数：``name`` 为函数名称；``value`` 为收到的非日期值。
+    返回：无，始终抛出异常。
+    异常：抛出 ``FormulaCalculationError``。
+    """
+    raise FormulaCalculationError(f"{name} 需要日期或日期时间值，而不是 {type(value).__name__}")
+
+
 _FUNCTIONS: dict[str, Callable[..., Any]] = {
     "SUM": _sum,
     "AVERAGE": _average,
@@ -265,11 +464,25 @@ _FUNCTIONS: dict[str, Callable[..., Any]] = {
     "ABS": abs,
     "INT": math.floor,
     "ROUND": _round,
+    "ROUNDUP": lambda value, digits=0: _round_direction(value, digits, up=True),
+    "ROUNDDOWN": lambda value, digits=0: _round_direction(value, digits, up=False),
     "CONCAT": _concat,
     "LEN": lambda value: len(str(value)),
     "LEFT": _left,
     "RIGHT": _right,
     "MID": _mid,
+    "SUMIF": _sumif,
+    "COUNTIF": _countif,
+    "AVERAGEIF": _averageif,
+    "DATE": _date,
+    "YEAR": lambda value: value.year if isinstance(value, (date, datetime)) else _date_error("YEAR", value),
+    "MONTH": lambda value: value.month if isinstance(value, (date, datetime)) else _date_error("MONTH", value),
+    "DAY": lambda value: value.day if isinstance(value, (date, datetime)) else _date_error("DAY", value),
+    "TODAY": lambda: date.today(),
+    "NOW": lambda: datetime.now().replace(microsecond=0),
+    "VLOOKUP": _vlookup,
+    "HLOOKUP": _hlookup,
+    "XLOOKUP": _lookup_vector,
 }
 
 
@@ -356,6 +569,29 @@ class _Evaluator:
                 return variable
 
             replaced = _REFERENCE_PATTERN.sub(replace, segment)
+
+            def replace_named_range(match: re.Match[str]) -> str:
+                """功能：把公式中的工作簿命名区域替换为内部变量。
+
+                使用方法：由本公式片段的名称替换过程自动调用。
+                参数：``match`` 为候选标识符匹配对象。
+                返回：名称不是工作簿命名区域或是函数调用时返回原文本；否则返回变量名。
+                """
+                name = match.group(1)
+                following = replaced[match.end():match.end() + 1]
+                if following == "(" or name.upper() in {"TRUE", "FALSE"}:
+                    return name
+                try:
+                    named_range = self.workbook.named_range(name)
+                except KeyError:
+                    return name
+                variable = f"_ref_{len(variables)}"
+                variables[variable] = self.reference(
+                    named_range.worksheet, named_range.range.address
+                )
+                return variable
+
+            replaced = _NAME_PATTERN.sub(replace_named_range, replaced)
             replaced = replaced.replace("<>", "!=").replace("^", "**")
             return re.sub(r"(?<![<>=])=(?!=)", "==", replaced)
 
@@ -437,6 +673,13 @@ class _Evaluator:
                 condition = bool(self.node(node.args[0], variables))
                 selected = node.args[1] if condition else (node.args[2] if len(node.args) == 3 else False)
                 return self.node(selected, variables) if isinstance(selected, ast.AST) else selected
+            if name == "IFERROR":
+                if len(node.args) != 2:
+                    raise FormulaCalculationError("IFERROR 需要2个参数")
+                try:
+                    return self.node(node.args[0], variables)
+                except Exception:
+                    return self.node(node.args[1], variables)
             function = _FUNCTIONS.get(name)
             if function is None:
                 raise FormulaCalculationError(f"不支持的公式函数：{name}")

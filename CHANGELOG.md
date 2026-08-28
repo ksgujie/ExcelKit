@@ -1,5 +1,17 @@
 # 更新日志
 
+## 0.6.0 - 2026-08-29
+
+- 新增基础 XLSX 图表：`Worksheet.add_chart()` 支持柱状、条形、折线与饼图，以及
+  系列、标题、图例和尺寸设置。
+- 新增 PNG/JPEG 图片插入：`Worksheet.add_image()`，支持锚点、尺寸、偏移和替代文本。
+- 新增传统批注：`Cell.note` 和 `excelkit.note.Note` 支持 XLSX 读写。
+- 新增区域排序 `Worksheet.sort()` / `SortKey`、实际筛选 `AutoFilter.apply()`，以及
+  `Worksheet.visibility` 的普通隐藏和非常隐藏状态。
+- 公式计算器新增命名区域引用、`SUMIF`、`COUNTIF`、`AVERAGEIF`、`IFERROR`、
+  `ROUNDUP`、`ROUNDDOWN`、日期函数、`VLOOKUP`、`HLOOKUP` 和 `XLOOKUP`。
+- 同步更新中文 API 手册、示例说明与回归测试。
+
 ## 0.5.0 - 2026-08-29
 
 - 增加行列插入/删除、公式引用同步、依赖关系查询（`Cell.dependencies`、`dependents`）。

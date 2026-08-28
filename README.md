@@ -1,14 +1,14 @@
-# ExcelKit 0.5.0
+# ExcelKit 0.6.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.5.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.6.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.5.0-py3-none-any.whl
+pip install excelkit-0.6.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -84,7 +84,12 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `row(index)`、`column(index)`：设置 0-based 行高、列宽和隐藏状态。
 - `merged_ranges`：返回全部合并区域的只读 tuple。
 - `freeze_panes`：设置冻结后的第一个可滚动 A1 单元格，`None` 清除。
-- `auto_filter_range`：设置或清除连续自动筛选区域；`auto_filter` 可增加列条件。
+- `auto_filter_range`：设置或清除连续自动筛选区域；`auto_filter` 可增加条件并 `apply()` 隐藏不匹配行。
+- `sort(address, *, keys, has_header=False)`：按 `SortKey` 对连续区域排序。
+- `visibility`：使用 `Worksheet.VISIBLE`、`HIDDEN`、`VERY_HIDDEN` 控制可见状态。
+- `add_chart(chart_type, anchor=...)`、`charts`：创建柱状、条形、折线或饼图。
+- `add_image(filename, anchor=...)`、`images`：插入 PNG/JPEG 图片。
+- `cell.note`：读取、设置或清除传统单元格批注。
 - `show_gridlines`：控制屏幕网格线。
 - `page`：页面布局与打印设置唯一入口。
 - `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表；Table 支持
@@ -427,14 +432,14 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.5.0 能力边界
+## 0.6.0 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域
 批量操作、基础样式、命名区域、基础 Table、模板安全数值表达式、XLS/XLSX 读写及
-CSV/TSV 读取、超链接、数据验证、条件格式、筛选条件、保护和文档属性。Python
-公式计算器不是 Excel 全函数兼容引擎；本版本也不包含批注、图表、图片、结构化
-Table 公式或流式读写。
+CSV/TSV 读取、超链接、传统批注、数据验证、条件格式、筛选条件、保护、文档属性、
+基础图表及 PNG/JPEG 图片写出。Python 公式计算器不是 Excel 全函数兼容引擎；本版本
+不包含从外部 XLSX 恢复图表或图片、结构化 Table 公式或流式读写。
 
 ## 开发验证
 
