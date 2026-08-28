@@ -14,8 +14,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Set, Type, TypeVar
 from ..address import cell_address, cell_index, column_to_index, range_index
 from ..core.page import HeaderFooter, PageMargins
 from ..errors import InvalidFileError
+from ..properties import WorkbookProperties
+from ..validation import Validation
+from ..conditional import ConditionalFormat
 from ..style import DEFAULT_STYLE, Style
-from .styles import _read_styles
+from .styles import _read_dxf_colors, _read_styles
 
 if TYPE_CHECKING:
     from ..core.workbook import Workbook
@@ -25,6 +28,9 @@ _WorkbookType = TypeVar("_WorkbookType", bound="Workbook")
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_CORE_PROPERTIES_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+_DCTERMS_NS = "http://purl.org/dc/terms/"
+_DC_NS = "http://purl.org/dc/elements/1.1/"
 _INTEGER_PATTERN = re.compile(r"^[+-]?\d+$")
 _ABSOLUTE_AREA_PATTERN = re.compile(
     r"\$([A-Za-z]{1,3})\$(\d+):\$([A-Za-z]{1,3})\$(\d+)"
@@ -60,6 +66,43 @@ def _read_xml(package: zipfile.ZipFile, member: str) -> ET.Element:
         return ET.fromstring(package.read(member))
     except (KeyError, ET.ParseError) as error:
         raise InvalidFileError(f"XLSX 部件缺失或损坏：{member}") from error
+
+
+def _load_core_properties(
+    package: zipfile.ZipFile, properties: WorkbookProperties
+) -> None:
+    """功能：读取 XLSX 核心文档属性并写入 WorkbookProperties。
+
+    使用方法：工作簿主结构创建后由内部调用。
+    参数：``package`` 为已打开的XLSX包；``properties`` 为目标属性对象。
+    返回：``None``；没有核心属性部件时保持默认值。
+    异常：属性 XML 损坏或时间格式无效时抛出 ``InvalidFileError``。
+    """
+    member = "docProps/core.xml"
+    if member not in package.namelist():
+        return
+    root = _read_xml(package, member)
+
+    def text(namespace: str, name: str) -> str:
+        """功能：读取核心属性元素文本，不存在时返回空字符串。"""
+        element = root.find(_tag(namespace, name))
+        return "" if element is None else (element.text or "")
+
+    properties.title = text(_DC_NS, "title")
+    properties.subject = text(_DC_NS, "subject")
+    properties.author = text(_DC_NS, "creator")
+    properties.comments = text(_DC_NS, "description")
+    properties.category = text(_CORE_PROPERTIES_NS, "category")
+    properties.keywords = text(_CORE_PROPERTIES_NS, "keywords")
+    properties.last_modified_by = text(_CORE_PROPERTIES_NS, "lastModifiedBy")
+    for name in ("created", "modified"):
+        value = text(_DCTERMS_NS, name)
+        if value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as error:
+                raise InvalidFileError(f"核心属性 {name} 的时间格式无效") from error
+            setattr(properties, name, parsed)
 
 
 def _relationship_targets(package: zipfile.ZipFile) -> Dict[str, str]:
@@ -244,11 +287,16 @@ def _header_footer(value: str | None) -> HeaderFooter:
     )
 
 
-def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
+def _load_sheet_layout(
+    root: ET.Element,
+    worksheet: "Worksheet",
+    dxf_colors: Sequence[Tuple[Optional[str], Optional[str]]] = (),
+) -> None:
     """功能：读取工作表合并、尺寸、视图、筛选和页面打印设置。
 
     使用方法：单张工作表值和样式读取完成后调用。
-    参数：``root`` 为工作表XML根元素；``worksheet`` 为目标工作表。
+    参数：``root`` 为工作表XML根元素；``worksheet`` 为目标工作表；
+    ``dxf_colors`` 为按差异样式索引排列的填充色和字体色。
     返回：``None``；解析结果写入目标对象。
     异常：地址、数值或页面属性损坏时抛出 :class:`InvalidFileError`。
     """
@@ -315,6 +363,67 @@ def _load_sheet_layout(root: ET.Element, worksheet: "Worksheet") -> None:
             worksheet.auto_filter_range = (
                 reference if ":" in reference else f"{reference}:{reference}"
             )
+            for filter_column in auto_filter.findall(_tag(_MAIN_NS, "filterColumn")):
+                try:
+                    column = int(filter_column.get("colId", "-1"))
+                except ValueError:
+                    continue
+                filters = filter_column.find(_tag(_MAIN_NS, "filters"))
+                if filters is not None and column >= 0:
+                    worksheet._filter_conditions[column] = tuple(
+                        item.get("val", "") for item in filters.findall(_tag(_MAIN_NS, "filter"))
+                    )
+
+        data_validations = root.find(_tag(_MAIN_NS, "dataValidations"))
+        if data_validations is not None:
+            for source in data_validations.findall(_tag(_MAIN_NS, "dataValidation")):
+                address = source.get("sqref")
+                kind = source.get("type", "custom")
+                if not address:
+                    raise ValueError("数据有效性缺少 sqref")
+                formula1_element = source.find(_tag(_MAIN_NS, "formula1"))
+                formula2_element = source.find(_tag(_MAIN_NS, "formula2"))
+                formula1 = formula1_element.text if formula1_element is not None else None
+                values = None
+                if kind == "list" and formula1 and formula1.startswith('"') and formula1.endswith('"'):
+                    values = tuple(formula1[1:-1].split(","))
+                    formula1 = None
+                worksheet._validations.append(Validation(
+                    address, kind=kind, operator=source.get("operator"),
+                    formula1=formula1,
+                    formula2=formula2_element.text if formula2_element is not None else None,
+                    values=values,
+                    allow_blank=_bool_attribute(source.get("allowBlank")),
+                    show_dropdown=source.get("showDropDown", "0") not in {"1", "true", "True"},
+                    prompt_title=source.get("promptTitle"), prompt=source.get("prompt"),
+                    error_title=source.get("errorTitle"), error=source.get("error"),
+                    error_style=source.get("errorStyle", "stop"),
+                ))
+
+        for group in root.findall(_tag(_MAIN_NS, "conditionalFormatting")):
+            address = group.get("sqref")
+            if not address:
+                continue
+            for source in group.findall(_tag(_MAIN_NS, "cfRule")):
+                formula_element = source.find(_tag(_MAIN_NS, "formula"))
+                try:
+                    dxf_index = int(source.get("dxfId", "-1"))
+                except ValueError:
+                    dxf_index = -1
+                fill, font = (
+                    dxf_colors[dxf_index]
+                    if 0 <= dxf_index < len(dxf_colors)
+                    else (None, None)
+                )
+                worksheet._conditionals.append(ConditionalFormat(
+                    address, rule=source.get("type", "cellIs"),
+                    operator=source.get("operator"),
+                    formula=formula_element.text if formula_element is not None else None,
+                    fill=fill,
+                    font=font,
+                    priority=int(source.get("priority", "1")),
+                    stop_if_true=_bool_attribute(source.get("stopIfTrue")),
+                ))
 
         options = root.find(_tag(_MAIN_NS, "printOptions"))
         if options is not None:
@@ -448,12 +557,13 @@ def _load_sheet(
     styles: Sequence[Style],
     date_styles: Set[int],
     date_1904: bool,
+    dxf_colors: Sequence[Tuple[Optional[str], Optional[str]]],
 ) -> None:
     """功能：读取单张工作表的值、公式、样式和已触及范围。
 
     使用方法：XLSX 主流程按工作表顺序调用。
     参数：``package`` 为 ZIP 包；``member`` 为工作表路径；``worksheet`` 为目标；
-    其余参数分别为共享字符串、样式、日期样式集合和日期系统。
+    其余参数分别为共享字符串、样式、日期样式集合、日期系统和条件格式差异样式颜色。
     返回：``None``；读取结果直接写入工作表。
     异常：XML、地址、样式索引或数据损坏时抛出相应异常。
     """
@@ -469,6 +579,12 @@ def _load_sheet(
             worksheet.color = tab_color.get("rgb")
         except ValueError as error:
             raise InvalidFileError("工作表标签颜色不是有效的 RGB 或 ARGB 值") from error
+    protection = root.find(_tag(_MAIN_NS, "sheetProtection"))
+    if protection is not None:
+        worksheet.protection.enabled = True
+        worksheet.protection.password = protection.get("password")
+        worksheet.protection.select_locked = protection.get("selectLockedCells", "0") not in {"1", "true", "True"}
+        worksheet.protection.select_unlocked = protection.get("selectUnlockedCells", "0") not in {"1", "true", "True"}
     for cell in root.findall(f".//{_tag(_MAIN_NS, 'sheetData')}//{_tag(_MAIN_NS, 'c')}"):
         address = cell.get("r")
         if not address:
@@ -497,8 +613,96 @@ def _load_sheet(
             worksheet._values.set(row, column, value)
         if style != DEFAULT_STYLE:
             worksheet._styles[(row, column)] = style
-    _load_sheet_layout(root, worksheet)
+    _load_sheet_layout(root, worksheet, dxf_colors)
+    _load_sheet_hyperlinks(package, member, root, worksheet)
     _load_sheet_tables(package, member, root, worksheet)
+
+
+def _sheet_relationships(
+    package: zipfile.ZipFile, member: str
+) -> Dict[str, Tuple[str, str]]:
+    """功能：读取单张工作表关系部件中的内部目标关系。
+
+    使用方法：读取超链接和数据表时由内部调用。
+    参数：``package`` 为已打开的XLSX包；``member`` 为工作表包内路径。
+    返回：关系编号到 ``(关系类型, 规范化目标路径)`` 的映射；没有关系部件时返回空字典。
+    异常：关系文件损坏、目标越出包根目录时抛出 ``InvalidFileError``。
+    """
+    directory, filename = posixpath.split(member)
+    relationships_member = posixpath.join(directory, "_rels", f"{filename}.rels")
+    if relationships_member not in package.namelist():
+        return {}
+    relationships_root = _read_xml(package, relationships_member)
+    targets: Dict[str, Tuple[str, str]] = {}
+    for relationship in relationships_root.findall(
+        _tag(_PACKAGE_REL_NS, "Relationship")
+    ):
+        relationship_id = relationship.get("Id")
+        target = relationship.get("Target")
+        relationship_type = relationship.get("Type", "")
+        if not relationship_id or not target:
+            continue
+        if relationship.get("TargetMode") == "External":
+            targets[relationship_id] = (relationship_type, target)
+            continue
+        target = target.replace("\\", "/")
+        normalized = (
+            posixpath.normpath(target.lstrip("/"))
+            if target.startswith("/")
+            else posixpath.normpath(posixpath.join(directory, target))
+        )
+        if normalized == ".." or normalized.startswith("../"):
+            raise InvalidFileError(f"非法的工作表关系目标：{target!r}")
+        targets[relationship_id] = (relationship_type, normalized)
+    return targets
+
+
+def _load_sheet_hyperlinks(
+    package: zipfile.ZipFile,
+    member: str,
+    root: ET.Element,
+    worksheet: "Worksheet",
+) -> None:
+    """功能：读取工作表中的外部和内部超链接。
+
+    使用方法：单张工作表布局读取后由内部调用。
+    参数：``package`` 为XLSX包；``member`` 为工作表路径；``root`` 为XML根元素；
+    ``worksheet`` 为接收链接的工作表。
+    返回：``None``；链接通过 ``Cell.hyperlink`` 写入目标工作表。
+    异常：链接地址、关系编号或关系类型无效时抛出 ``InvalidFileError``。
+    """
+    container = root.find(_tag(_MAIN_NS, "hyperlinks"))
+    if container is None:
+        return
+    relationships = _sheet_relationships(package, member)
+    hyperlink_type = "/relationships/hyperlink"
+    try:
+        for item in container.findall(_tag(_MAIN_NS, "hyperlink")):
+            address = item.get("ref")
+            if not address or ":" in address:
+                raise InvalidFileError("超链接 ref 必须是单个A1地址")
+            location = item.get("location")
+            relationship_id = item.get(_tag(_REL_NS, "id"))
+            target = None
+            if relationship_id is not None:
+                relationship = relationships.get(relationship_id)
+                if relationship is None or not relationship[0].endswith(hyperlink_type):
+                    raise InvalidFileError("超链接关系缺失或类型错误")
+                target = relationship[1]
+            if target is None and location is None:
+                raise InvalidFileError("超链接缺少外部目标或内部位置")
+            from ..hyperlink import Hyperlink
+
+            worksheet.cell(address).hyperlink = Hyperlink(
+                target=target,
+                location=location,
+                display=item.get("display"),
+                tooltip=item.get("tooltip"),
+            )
+    except (TypeError, ValueError, KeyError) as error:
+        if isinstance(error, InvalidFileError):
+            raise
+        raise InvalidFileError("工作表超链接定义无效") from error
 
 
 def _load_sheet_tables(
@@ -518,32 +722,14 @@ def _load_sheet_tables(
     table_parts = root.find(_tag(_MAIN_NS, "tableParts"))
     if table_parts is None:
         return
-    directory, filename = posixpath.split(member)
-    relationships_member = posixpath.join(directory, "_rels", f"{filename}.rels")
-    relationships_root = _read_xml(package, relationships_member)
-    targets: Dict[str, str] = {}
-    for relationship in relationships_root.findall(
-        _tag(_PACKAGE_REL_NS, "Relationship")
-    ):
-        relationship_id = relationship.get("Id")
-        target = relationship.get("Target")
-        relationship_type = relationship.get("Type", "")
-        if (
-            not relationship_id
-            or not target
-            or relationship.get("TargetMode") == "External"
-            or not relationship_type.endswith("/table")
-        ):
-            continue
-        target = target.replace("\\", "/")
-        normalized = (
-            posixpath.normpath(target.lstrip("/"))
-            if target.startswith("/")
-            else posixpath.normpath(posixpath.join(directory, target))
-        )
-        if normalized == ".." or normalized.startswith("../"):
-            raise InvalidFileError(f"非法的数据表关系目标：{target!r}")
-        targets[relationship_id] = normalized
+    relationships = _sheet_relationships(package, member)
+    targets = {
+        relationship_id: target
+        for relationship_id, (relationship_type, target) in relationships.items()
+        if relationship_type.endswith("/table")
+    }
+    if not targets:
+        raise InvalidFileError("工作表数据表关系缺失")
 
     try:
         for table_part in table_parts.findall(_tag(_MAIN_NS, "tablePart")):
@@ -560,7 +746,7 @@ def _load_sheet_tables(
                 style_info.get("name", "TableStyleMedium2")
                 if style_info is not None else "TableStyleMedium2"
             )
-            worksheet.add_table(
+            table = worksheet.add_table(
                 address,
                 name=name,
                 style=style,
@@ -574,6 +760,15 @@ def _load_sheet_tables(
                     and style_info.get("showColumnStripes", "0") in {"1", "true", "True"}
                 ),
             )
+            table.show_totals = table_root.get("totalsRowShown", "0") in {"1", "true", "True"}
+            columns = table_root.find(_tag(_MAIN_NS, "tableColumns"))
+            if columns is not None:
+                names = table.columns
+                for column in columns.findall(_tag(_MAIN_NS, "tableColumn")):
+                    function = column.get("totalsRowFunction")
+                    index = int(column.get("id", "0")) - 1
+                    if function and 0 <= index < len(names):
+                        table.totals[names[index]] = function
     except (TypeError, ValueError, KeyError) as error:
         if isinstance(error, InvalidFileError):
             raise
@@ -601,11 +796,17 @@ def _load_xlsx(
         targets = _relationship_targets(package)
         shared_strings = _shared_strings(package)
         styles, date_styles = _read_styles(package)
+        dxf_colors = _read_dxf_colors(package)
         properties = workbook_root.find(_tag(_MAIN_NS, "workbookPr"))
         date_1904 = properties is not None and properties.get("date1904", "0") in {
             "1", "true", "True"
         }
         workbook = workbook_class()
+        _load_core_properties(package, workbook.properties)
+        workbook_protection = workbook_root.find(_tag(_MAIN_NS, "workbookProtection"))
+        if workbook_protection is not None:
+            workbook.protection.enabled = True
+            workbook.protection.password = workbook_protection.get("workbookPassword")
         sheets = workbook_root.find(_tag(_MAIN_NS, "sheets"))
         if sheets is None:
             raise InvalidFileError("workbook.xml 缺少 sheets 元素")
@@ -617,7 +818,7 @@ def _load_xlsx(
             worksheet = workbook.add_sheet(name)
             _load_sheet(
                 package, targets[relationship_id], worksheet, shared_strings,
-                styles, date_styles, date_1904
+                styles, date_styles, date_1904, dxf_colors
             )
         _load_defined_names(workbook_root, workbook)
         return workbook

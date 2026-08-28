@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 _WorkbookType = TypeVar("_WorkbookType", bound="Workbook")
 
 
-def _decode_text(payload: bytes) -> str:
+def _decode_text(payload: bytes, encoding: str | None = None) -> str:
     """功能：使用常见表格文本编码解码文件内容。
 
     使用方法：CSV/TSV 主读取函数读取字节后内部调用。
@@ -24,6 +24,13 @@ def _decode_text(payload: bytes) -> str:
     返回：解码后的 Unicode 字符串。
     异常：所有支持编码均失败时抛出 :class:`InvalidFileError`。
     """
+    if encoding is not None:
+        if not isinstance(encoding, str) or not encoding:
+            raise TypeError("encoding 必须是非空字符串或 None")
+        try:
+            return payload.decode(encoding)
+        except (LookupError, UnicodeDecodeError) as error:
+            raise InvalidFileError(f"无法使用编码 {encoding!r} 读取文本表格") from error
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
             return payload.decode(encoding)
@@ -32,7 +39,7 @@ def _decode_text(payload: bytes) -> str:
     raise InvalidFileError("文本表格不是支持的 UTF-8 或 GB18030 编码")
 
 
-def _detect_delimiter(text: str, suffix: str) -> str:
+def _detect_delimiter(text: str, suffix: str, delimiter: str | None = None) -> str:
     """功能：确定分隔文本文件使用的字段分隔符。
 
     使用方法：读取文本内容后由主函数内部调用。
@@ -40,6 +47,10 @@ def _detect_delimiter(text: str, suffix: str) -> str:
     制表符，``.csv`` 在逗号、分号、制表符和竖线中检测。
     返回：单字符分隔符字符串。
     """
+    if delimiter is not None:
+        if not isinstance(delimiter, str) or len(delimiter) != 1:
+            raise ValueError("delimiter 必须是单字符字符串或 None")
+        return delimiter
     if suffix == ".tsv":
         return "\t"
     try:
@@ -49,7 +60,9 @@ def _detect_delimiter(text: str, suffix: str) -> str:
 
 
 def _load_delimited(
-    workbook_class: Type[_WorkbookType], filename: os.PathLike | str
+    workbook_class: Type[_WorkbookType], filename: os.PathLike | str, *,
+    encoding: str | None = None, delimiter: str | None = None,
+    has_header: bool = False,
 ) -> _WorkbookType:
     """功能：把 CSV 或 TSV 文件读取为单工作表 Workbook。
 
@@ -61,13 +74,17 @@ def _load_delimited(
     :class:`InvalidFileError`。
     """
     path = Path(filename)
-    text = _decode_text(path.read_bytes())
-    delimiter = _detect_delimiter(text, path.suffix.lower())
+    if not isinstance(has_header, bool):
+        raise TypeError("has_header 必须是 bool")
+    text = _decode_text(path.read_bytes(), encoding)
+    delimiter = _detect_delimiter(text, path.suffix.lower(), delimiter)
     workbook = workbook_class()
     worksheet = workbook.add_sheet("Sheet1")
     try:
         rows = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
         for row_index, row_values in enumerate(rows):
+            if row_index == 0 and has_header:
+                worksheet._headers = tuple(row_values)
             if not row_values:
                 worksheet._touch(row_index, 0)
                 continue

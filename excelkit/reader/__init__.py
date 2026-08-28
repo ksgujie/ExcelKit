@@ -21,7 +21,9 @@ _DELIMITED_SUFFIXES = {".csv", ".tsv"}
 
 
 def _load_workbook(
-    workbook_class: Type[_WorkbookType], filename: os.PathLike | str
+    workbook_class: Type[_WorkbookType], filename: os.PathLike | str, *,
+    encoding: str | None = None, delimiter: str | None = None,
+    has_header: bool = False,
 ) -> _WorkbookType:
     """功能：按扩展名和文件结构分派到唯一对应读取实现。
 
@@ -37,7 +39,10 @@ def _load_workbook(
     path = Path(filename)
     suffix = path.suffix.lower()
     if suffix in _DELIMITED_SUFFIXES:
-        return _load_delimited(workbook_class, path)
+        return _load_delimited(workbook_class, path, encoding=encoding,
+                               delimiter=delimiter, has_header=has_header)
+    if encoding is not None or delimiter is not None or has_header:
+        raise ValueError("encoding、delimiter、has_header 仅适用于 CSV/TSV 文件")
     if suffix == ".xls":
         return _load_xls(workbook_class, path)
     if suffix in _OPEN_XML_SUFFIXES:

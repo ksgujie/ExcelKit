@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence, Union
 
 from ..address import cell_address, index_to_column, range_index
 from ..core.page import header_footer_text
+from ..properties import WorkbookProperties
 from ..style import DEFAULT_STYLE
 from .styles import StyleRegistry
 
@@ -26,10 +27,18 @@ _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+_CORE_PROPERTIES_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+_DCTERMS_NS = "http://purl.org/dc/terms/"
+_DC_NS = "http://purl.org/dc/elements/1.1/"
+_XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 _XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 
 ET.register_namespace("", _MAIN_NS)
 ET.register_namespace("r", _REL_NS)
+ET.register_namespace("cp", _CORE_PROPERTIES_NS)
+ET.register_namespace("dcterms", _DCTERMS_NS)
+ET.register_namespace("dc", _DC_NS)
+ET.register_namespace("xsi", _XSI_NS)
 
 _ILLEGAL_XML_CHARACTERS = re.compile(
     "[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]"
@@ -136,6 +145,14 @@ def content_types(sheet_count: int, table_count: int = 0) -> bytes:
             ),
         },
     )
+    ET.SubElement(
+        root,
+        _qname(_CONTENT_TYPES_NS, "Override"),
+        {
+            "PartName": "/docProps/core.xml",
+            "ContentType": "application/vnd.openxmlformats-package.core-properties+xml",
+        },
+    )
     for sheet_index in range(sheet_count):
         ET.SubElement(
             root,
@@ -173,7 +190,7 @@ def content_types(sheet_count: int, table_count: int = 0) -> bytes:
 
 
 def workbook_xml(
-    sheets: Sequence["Worksheet"], named_ranges: Sequence[object] = ()
+    sheets: Sequence["Worksheet"], named_ranges: Sequence[object] = (), protection=None
 ) -> bytes:
     """功能：生成包含工作表名称、顺序和关系编号的工作簿 XML。
 
@@ -244,6 +261,11 @@ def workbook_xml(
             ET.SubElement(
                 container, _qname(_MAIN_NS, "definedName"), attributes
             ).text = value
+    if protection is not None and protection.enabled:
+        attributes = {}
+        if protection.password:
+            attributes["workbookPassword"] = str(protection.password)
+        ET.SubElement(root, _qname(_MAIN_NS, "workbookProtection"), attributes)
     ET.SubElement(
         root,
         _qname(_MAIN_NS, "calcPr"),
@@ -402,7 +424,7 @@ def table_xml(table: "Table", table_id: int) -> bytes:
         "name": table.name,
         "displayName": table.name,
         "ref": area.address,
-        "totalsRowShown": "0",
+        "totalsRowShown": "1" if table.show_totals else "0",
     }
     if not table.has_header:
         attributes["headerRowCount"] = "0"
@@ -414,11 +436,14 @@ def table_xml(table: "Table", table_id: int) -> bytes:
         root, _qname(_MAIN_NS, "tableColumns"), {"count": str(len(names))}
     )
     for column_id, name in enumerate(names, 1):
-        ET.SubElement(
+        element = ET.SubElement(
             columns,
             _qname(_MAIN_NS, "tableColumn"),
             {"id": str(column_id), "name": _escape_text(name)},
         )
+        function = table.totals.get(name)
+        if function:
+            element.set("totalsRowFunction", function)
     ET.SubElement(
         root,
         _qname(_MAIN_NS, "tableStyleInfo"),
@@ -433,15 +458,33 @@ def table_xml(table: "Table", table_id: int) -> bytes:
     return _xml_bytes(root)
 
 
-def worksheet_rels(table_ids: Sequence[int]) -> bytes:
-    """功能：生成单张工作表到其数据表部件的关系清单。
+def worksheet_rels(
+    table_ids: Sequence[int] = (), hyperlink_targets: Sequence[str] = ()
+) -> bytes:
+    """功能：生成单张工作表到超链接和数据表部件的关系清单。
 
-    使用方法：工作表包含数据表时由XLSX打包器调用。
-    参数：``table_ids`` 为当前工作表数据表对应的全局1-based编号。
+    使用方法：工作表包含超链接或数据表时由XLSX打包器调用。
+    参数：``table_ids`` 为当前工作表数据表对应的全局1-based编号；
+    ``hyperlink_targets`` 为按单元格顺序排列的外部链接目标。
     返回：工作表 ``.rels`` XML字节串。
     """
     root = ET.Element(_qname(_PACKAGE_REL_NS, "Relationships"))
-    for relationship_index, table_id in enumerate(table_ids, 1):
+    for relationship_index, target in enumerate(hyperlink_targets, 1):
+        ET.SubElement(
+            root,
+            _qname(_PACKAGE_REL_NS, "Relationship"),
+            {
+                "Id": f"rId{relationship_index}",
+                "Type": (
+                    "http://schemas.openxmlformats.org/officeDocument/2006/"
+                    "relationships/hyperlink"
+                ),
+                "Target": target,
+                "TargetMode": "External",
+            },
+        )
+    relationship_offset = len(hyperlink_targets)
+    for relationship_index, table_id in enumerate(table_ids, relationship_offset + 1):
         ET.SubElement(
             root,
             _qname(_PACKAGE_REL_NS, "Relationship"),
@@ -461,12 +504,14 @@ def sheet_xml(
     sheet: "Worksheet",
     style_registry: Optional[StyleRegistry] = None,
     table_ids: Sequence[int] = (),
+    hyperlink_count: int = 0,
 ) -> bytes:
     """功能：生成单张工作表的完整 SpreadsheetML XML。
 
     使用方法：由 :class:`XlsxWriter` 对工作簿中的每张工作表调用。
     参数：``sheet`` 为待写出的工作表；``style_registry`` 为工作簿共享样式注册器，
-    省略时为当前单表临时创建；``table_ids`` 为本表数据表对应的全局1-based编号。
+    省略时为当前单表临时创建；``table_ids`` 为本表数据表对应的全局1-based编号；
+    ``hyperlink_count`` 为本表外部超链接关系数量。
     普通值、公式和样式按0-based行列索引合并排序。
     返回：包含精确数据边界和 ``sheetData`` 的 UTF-8 XML 字节串。
     """
@@ -483,6 +528,15 @@ def sheet_xml(
                 _qname(_MAIN_NS, "tabColor"),
                 {"rgb": sheet.color},
             )
+    if sheet.protection.enabled:
+        protection_attributes = {}
+        if sheet.protection.password:
+            protection_attributes["password"] = str(sheet.protection.password)
+        if not sheet.protection.select_locked:
+            protection_attributes["selectLockedCells"] = "0"
+        if not sheet.protection.select_unlocked:
+            protection_attributes["selectUnlockedCells"] = "0"
+        ET.SubElement(root, _qname(_MAIN_NS, "sheetProtection"), protection_attributes)
         if fit_mode:
             ET.SubElement(
                 properties, _qname(_MAIN_NS, "pageSetUpPr"), {"fitToPage": "1"}
@@ -490,7 +544,12 @@ def sheet_xml(
     if style_registry is None:
         style_registry = StyleRegistry([sheet])
     values = dict(sheet._values.items())
-    coordinates = set(values) | set(sheet._formulas) | set(sheet._styles)
+    coordinates = (
+        set(values)
+        | set(sheet._formulas)
+        | set(sheet._styles)
+        | set(sheet._hyperlinks)
+    )
     if coordinates:
         rows = [row for row, _column in coordinates]
         columns = [column for _row, column in coordinates]
@@ -586,9 +645,12 @@ def sheet_xml(
                     element.set("s", str(style_id))
                 row_element.append(element)
     if sheet.auto_filter_range is not None:
-        ET.SubElement(
-            root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.auto_filter_range}
-        )
+        auto_filter = ET.SubElement(root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.auto_filter_range})
+        for column, values in sorted(sheet._filter_conditions.items()):
+            filter_column = ET.SubElement(auto_filter, _qname(_MAIN_NS, "filterColumn"), {"colId": str(column)})
+            custom = ET.SubElement(filter_column, _qname(_MAIN_NS, "filters"))
+            for value in values:
+                ET.SubElement(custom, _qname(_MAIN_NS, "filter"), {"val": value})
     if sheet._merged_ranges:
         merge_cells = ET.SubElement(
             root,
@@ -606,6 +668,72 @@ def sheet_xml(
                     )
                 },
             )
+
+    if sheet.hyperlinks:
+        hyperlinks = ET.SubElement(root, _qname(_MAIN_NS, "hyperlinks"))
+        external_index = 0
+        for address, link in sheet.hyperlinks:
+            attributes = {"ref": address}
+            if link.target is not None:
+                external_index += 1
+                attributes[_qname(_REL_NS, "id")] = f"rId{external_index}"
+            if link.location is not None:
+                attributes["location"] = link.location
+            if link.display is not None:
+                attributes["display"] = link.display
+            if link.tooltip is not None:
+                attributes["tooltip"] = link.tooltip
+            ET.SubElement(hyperlinks, _qname(_MAIN_NS, "hyperlink"), attributes)
+
+    if sheet.validations:
+        validations = ET.SubElement(
+            root, _qname(_MAIN_NS, "dataValidations"),
+            {"count": str(len(sheet.validations))},
+        )
+        for validation in sheet.validations:
+            attributes = {
+                "sqref": validation.range,
+                "type": validation.kind,
+                "allowBlank": "1" if validation.allow_blank else "0",
+                "showDropDown": "0" if validation.show_dropdown else "1",
+                "errorStyle": validation.error_style,
+            }
+            if validation.operator:
+                attributes["operator"] = validation.operator
+            for key, value in (("promptTitle", validation.prompt_title),
+                               ("prompt", validation.prompt),
+                               ("errorTitle", validation.error_title),
+                               ("error", validation.error)):
+                if value is not None:
+                    attributes[key] = str(value)
+            item = ET.SubElement(root.find(_qname(_MAIN_NS, "dataValidations")),
+                                 _qname(_MAIN_NS, "dataValidation"), attributes)
+            if validation.kind == "list" and validation.values is not None:
+                formula1 = '"' + ",".join(validation.values) + '"'
+            else:
+                formula1 = validation.formula1
+            if formula1 is not None:
+                ET.SubElement(item, _qname(_MAIN_NS, "formula1")).text = str(formula1)
+            if validation.formula2 is not None:
+                ET.SubElement(item, _qname(_MAIN_NS, "formula2")).text = str(validation.formula2)
+
+    for conditional in sheet.conditional_formats:
+        group = ET.SubElement(root, _qname(_MAIN_NS, "conditionalFormatting"),
+                              {"sqref": conditional.range})
+        attributes = {
+            "type": conditional.rule,
+            "priority": str(conditional.priority),
+            "stopIfTrue": "1" if conditional.stop_if_true else "0",
+        }
+        if conditional.operator:
+            attributes["operator"] = conditional.operator
+        if conditional.fill or conditional.font:
+            dxf_id = style_registry.dxf_ids.get(id(conditional))
+            if dxf_id is not None:
+                attributes["dxfId"] = str(dxf_id)
+        rule = ET.SubElement(group, _qname(_MAIN_NS, "cfRule"), attributes)
+        if conditional.formula is not None:
+            ET.SubElement(rule, _qname(_MAIN_NS, "formula")).text = str(conditional.formula)
 
     print_options = {
         "horizontalCentered": "1" if page.center_horizontal else "0",
@@ -664,7 +792,7 @@ def sheet_xml(
             ET.SubElement(
                 table_parts,
                 _qname(_MAIN_NS, "tablePart"),
-                {_qname(_REL_NS, "id"): f"rId{relationship_index}"},
+                {_qname(_REL_NS, "id"): f"rId{hyperlink_count + relationship_index}"},
             )
     return _xml_bytes(root)
 
@@ -689,6 +817,49 @@ def _root_rels() -> bytes:
             "Target": "xl/workbook.xml",
         },
     )
+    ET.SubElement(
+        root,
+        _qname(_PACKAGE_REL_NS, "Relationship"),
+        {
+            "Id": "rId2",
+            "Type": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+            "Target": "docProps/core.xml",
+        },
+    )
+    return _xml_bytes(root)
+
+
+def core_properties_xml(properties: WorkbookProperties) -> bytes:
+    """功能：把工作簿文档属性写成 Open Packaging 核心属性 XML。
+
+    使用方法：由 ``XlsxWriter`` 内部写入 ``docProps/core.xml``；二次开发也可直接调用。
+    参数：``properties`` 为 ``WorkbookProperties`` 对象。
+    返回：带 XML 声明的 UTF-8 XML 字节串。
+    异常：参数不是 ``WorkbookProperties`` 时抛出 ``TypeError``。
+    """
+    if not isinstance(properties, WorkbookProperties):
+        raise TypeError("properties 必须是 WorkbookProperties")
+    root = ET.Element(_qname(_CORE_PROPERTIES_NS, "coreProperties"))
+    fields = (
+        (_DC_NS, "title", properties.title),
+        (_DC_NS, "subject", properties.subject),
+        (_DC_NS, "creator", properties.author),
+        (_DC_NS, "description", properties.comments),
+        (_CORE_PROPERTIES_NS, "keywords", properties.keywords),
+        (_CORE_PROPERTIES_NS, "category", properties.category),
+        (_CORE_PROPERTIES_NS, "lastModifiedBy", properties.last_modified_by),
+    )
+    for namespace, name, value in fields:
+        if value:
+            ET.SubElement(root, _qname(namespace, name)).text = _escape_text(value)
+    for name, value in (("created", properties.created), ("modified", properties.modified)):
+        if value is not None:
+            element = ET.SubElement(
+                root,
+                _qname(_DCTERMS_NS, name),
+                {_qname(_XSI_NS, "type"): "dcterms:W3CDTF"},
+            )
+            element.text = value.isoformat()
     return _xml_bytes(root)
 
 
@@ -753,21 +924,35 @@ class XlsxWriter:
                 )
                 package.writestr("_rels/.rels", _root_rels())
                 package.writestr(
+                    "docProps/core.xml",
+                    core_properties_xml(self.workbook.properties),
+                )
+                package.writestr(
                     "xl/workbook.xml",
-                    workbook_xml(sheets, self.workbook.named_ranges),
+                    workbook_xml(sheets, self.workbook.named_ranges, self.workbook.protection),
                 )
                 package.writestr("xl/_rels/workbook.xml.rels", workbook_rels(sheets))
                 package.writestr("xl/styles.xml", style_registry.xml())
                 for sheet_index, worksheet in enumerate(sheets):
                     table_ids = sheet_table_ids[sheet_index]
+                    hyperlink_targets = tuple(
+                        link.target
+                        for _address, link in worksheet.hyperlinks
+                        if link.target is not None
+                    )
                     package.writestr(
                         f"xl/worksheets/sheet{sheet_index + 1}.xml",
-                        sheet_xml(worksheet, style_registry, table_ids),
+                        sheet_xml(
+                            worksheet,
+                            style_registry,
+                            table_ids,
+                            len(hyperlink_targets),
+                        ),
                     )
-                    if table_ids:
+                    if table_ids or hyperlink_targets:
                         package.writestr(
                             f"xl/worksheets/_rels/sheet{sheet_index + 1}.xml.rels",
-                            worksheet_rels(table_ids),
+                            worksheet_rels(table_ids, hyperlink_targets),
                         )
                 for table_id, table in table_entries:
                     package.writestr(
@@ -787,6 +972,7 @@ class XlsxWriter:
 __all__ = [
     "XlsxWriter",
     "content_types",
+    "core_properties_xml",
     "workbook_xml",
     "workbook_rels",
     "cell_xml",

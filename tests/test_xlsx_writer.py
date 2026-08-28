@@ -35,6 +35,7 @@ class XlsxWriterTests(unittest.TestCase):
                     {
                         "[Content_Types].xml",
                         "_rels/.rels",
+                        "docProps/core.xml",
                         "xl/workbook.xml",
                         "xl/_rels/workbook.xml.rels",
                         "xl/styles.xml",

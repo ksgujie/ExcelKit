@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..address import cell_address
+from ..hyperlink import Hyperlink
 from ..style import Style
 from .conversion import (
     as_bool as _convert_bool,
@@ -186,6 +187,29 @@ class Cell:
         return self._worksheet._values.get(self._row, self._column)
 
     @property
+    def hyperlink(self) -> Optional[Hyperlink]:
+        """功能：读取当前单元格的超链接定义。
+
+        使用方法：``link = worksheet["A1"].hyperlink``。
+        参数：无，只读时不需要参数；设置链接使用同名属性设置器。
+        返回：``Hyperlink``；当前单元格没有超链接时返回 ``None``。
+        """
+        return self._worksheet._get_hyperlink(self._row, self._column)
+
+    @hyperlink.setter
+    def hyperlink(self, value: Optional[Hyperlink | str]) -> None:
+        """功能：设置、替换或清除当前单元格的超链接。
+
+        使用方法：``cell.hyperlink = "https://example.com"``；也可赋值
+        ``Hyperlink(...)``，赋值 ``None`` 清除链接。
+        参数：``value`` 为网址/文件路径字符串、``Hyperlink`` 对象或 ``None``。
+        返回：``None``；链接不改变单元格普通值、公式和样式。
+        异常：类型或超链接字段无效时抛出 ``TypeError`` 或 ``ValueError``；合并区域
+        的非左上角单元格禁止设置。
+        """
+        self._worksheet._set_hyperlink(self._row, self._column, value)
+
+    @property
     def cached_value(self) -> Any:
         """功能：读取公式最近一次由表格软件或工作簿计算器生成的缓存结果。
 
@@ -213,6 +237,40 @@ class Cell:
         if coordinate in self._worksheet._formula_values:
             return "calculated"
         return "pending"
+
+    @property
+    def dependencies(self) -> tuple["Cell", ...]:
+        """功能：取得当前公式直接依赖的单元格快照对象。
+
+        使用方法：``for source in worksheet["C3"].dependencies: print(source.address)``。
+        参数：无。
+        返回：按公式出现顺序去重的 ``Cell`` 元组；普通值单元格返回空元组。
+        该属性只解析引用，不触发公式计算，也不会写回文件。
+        异常：公式中的工作表名称或地址无效时透传对应异常。
+        """
+        if self.formula is None:
+            return ()
+        from .calculation import formula_dependencies
+        return formula_dependencies(self._worksheet._workbook, self._worksheet, self.formula)
+
+    @property
+    def dependents(self) -> tuple["Cell", ...]:
+        """功能：查找当前单元格被哪些公式单元格直接引用。
+
+        使用方法：``for item in worksheet["A1"].dependents: print(item.address)``。
+        参数：无。
+        返回：工作簿中按工作表顺序、地址顺序排列的公式 ``Cell`` 元组；没有引用
+        时返回空元组。只解析依赖关系，不触发公式计算。
+        异常：依赖公式含有无效工作表或地址时透传对应异常。
+        """
+        result = []
+        for worksheet in self._worksheet._workbook.sheets:
+            for row, column in sorted(worksheet._formulas):
+                candidate = worksheet.cell(row, column)
+                if any(source._worksheet is self._worksheet and source.index == self.index
+                       for source in candidate.dependencies):
+                    result.append(candidate)
+        return tuple(result)
 
     @property
     def calculation_error(self) -> Optional[str]:

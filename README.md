@@ -1,14 +1,14 @@
-# ExcelKit 0.4.0
+# ExcelKit 0.5.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.4.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.5.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.4.0-py3-none-any.whl
+pip install excelkit-0.5.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -61,7 +61,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
   命名区域。
 - `sheets`：按创建顺序返回工作表 tuple。
 - `active`：返回第一张工作表；空工作簿会创建 `Sheet1`。
-- `Workbook.load(filename)`：读取 XLS、XLSX、XLSM、XLTX、CSV 或 TSV。
+- `Workbook.load(filename, *, encoding=None, delimiter=None, has_header=False)`：读取
+  XLS、XLSX、XLSM、XLTX、CSV 或 TSV；文本文件可指定编码、分隔符和表头。
 - `render(data=None, *, sheet_data=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
 - `calculate(*, strict=False)`：在 Python 中计算当前支持的公式并更新缓存结果。
@@ -83,10 +84,11 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `row(index)`、`column(index)`：设置 0-based 行高、列宽和隐藏状态。
 - `merged_ranges`：返回全部合并区域的只读 tuple。
 - `freeze_panes`：设置冻结后的第一个可滚动 A1 单元格，`None` 清除。
-- `auto_filter_range`：设置或清除连续自动筛选区域。
+- `auto_filter_range`：设置或清除连续自动筛选区域；`auto_filter` 可增加列条件。
 - `show_gridlines`：控制屏幕网格线。
 - `page`：页面布局与打印设置唯一入口。
-- `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表。
+- `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表；Table 支持
+  `columns`、`resize()`、`append()`、`append_rows()`、`clear_data()` 和汇总行。
 - `table(name)`、`tables`、`remove_table(name)`：查询、枚举或删除本表数据表定义。
 
 `cell_at` 已彻底删除。数字坐标和 A1 地址统一由 `cell()` 处理。
@@ -425,13 +427,14 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.4.0 能力边界
+## 0.5.0 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域
 批量操作、基础样式、命名区域、基础 Table、模板安全数值表达式、XLS/XLSX 读写及
-CSV/TSV 读取。Python 公式计算器不是 Excel 全函数兼容引擎；本版本也不包含条件
-格式、数据验证、超链接对象、批注、图表、图片、结构化 Table 公式或流式读写。
+CSV/TSV 读取、超链接、数据验证、条件格式、筛选条件、保护和文档属性。Python
+公式计算器不是 Excel 全函数兼容引擎；本版本也不包含批注、图表、图片、结构化
+Table 公式或流式读写。
 
 ## 开发验证
 

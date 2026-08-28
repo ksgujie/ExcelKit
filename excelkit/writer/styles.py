@@ -90,6 +90,9 @@ class StyleRegistry:
             number_format: index + 164
             for index, number_format in enumerate(custom_formats)
         }
+        self.dxfs = [item for sheet in sheets for item in getattr(sheet, "_conditionals", ())
+                     if item.fill or item.font]
+        self.dxf_ids = {id(item): index for index, item in enumerate(self.dxfs)}
 
     def style_id(self, style: Style) -> int:
         """功能：取得 Style 对应的 0-based XLSX cellXfs 索引。
@@ -125,7 +128,23 @@ class StyleRegistry:
         self._append_fills(root)
         self._append_borders(root)
         self._append_cell_styles(root)
+        self._append_dxfs(root)
         return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    def _append_dxfs(self, root: ET.Element) -> None:
+        """功能：写出条件格式使用的差异样式；参数为样式表根元素；返回 None。"""
+        if not self.dxfs:
+            return
+        element = ET.SubElement(root, _tag("dxfs"), {"count": str(len(self.dxfs))})
+        for item in self.dxfs:
+            dxf = ET.SubElement(element, _tag("dxf"))
+            if item.font:
+                font = ET.SubElement(dxf, _tag("font"))
+                ET.SubElement(font, _tag("color"), {"rgb": item.font})
+            if item.fill:
+                fill = ET.SubElement(dxf, _tag("fill"))
+                pattern = ET.SubElement(fill, _tag("patternFill"), {"patternType": "solid"})
+                ET.SubElement(pattern, _tag("fgColor"), {"rgb": item.fill})
 
     def _append_number_formats(self, root: ET.Element) -> None:
         """功能：向样式表追加自定义数字格式集合。

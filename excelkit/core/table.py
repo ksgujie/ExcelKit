@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .range import Range
@@ -14,7 +14,7 @@ class Table:
 
     __slots__ = (
         "_worksheet", "_name", "_bounds", "_style", "_has_header",
-        "_show_row_stripes", "_show_column_stripes",
+        "_show_row_stripes", "_show_column_stripes", "_show_totals", "_totals",
     )
 
     def __init__(
@@ -42,6 +42,8 @@ class Table:
         self.has_header = has_header
         self.show_row_stripes = show_row_stripes
         self.show_column_stripes = show_column_stripes
+        self._show_totals = False
+        self._totals: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -162,6 +164,102 @@ class Table:
         if not isinstance(value, bool):
             raise TypeError("show_column_stripes 必须是布尔值")
         self._show_column_stripes = value
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        """功能：取得数据表各列的表头名称。
+
+        使用方法：``names = table.columns``。
+        参数：无。
+        返回：首行单元格文本组成的元组；空表头或重复表头会自动使用
+        ``Column1``、``Column2`` 等唯一名称。
+        """
+        names: list[str] = []
+        used: set[str] = set()
+        row = self._bounds[0]
+        for column in range(self._bounds[1], self._bounds[3] + 1):
+            value = self._worksheet.cell(row, column).value if self.has_header else None
+            name = str(value) if value not in (None, "") else f"Column{len(names) + 1}"
+            base, number = name, 1
+            while name.casefold() in used:
+                number += 1
+                name = f"{base}_{number}"
+            used.add(name.casefold())
+            names.append(name)
+        return tuple(names)
+
+    @property
+    def show_totals(self) -> bool:
+        """功能：读取是否显示数据表汇总行。使用方法：``table.show_totals``。"""
+        return self._show_totals
+
+    @show_totals.setter
+    def show_totals(self, value: bool) -> None:
+        """功能：设置是否显示数据表汇总行。参数 ``value`` 必须为布尔值。"""
+        if not isinstance(value, bool):
+            raise TypeError("show_totals 必须是布尔值")
+        self._show_totals = value
+
+    @property
+    def totals(self) -> dict[str, str]:
+        """功能：取得或修改列汇总函数映射。使用方法：``table.totals['金额'] = 'sum'``。
+
+        参数：字典键为列名，值为 Excel 支持的汇总函数名，如 ``sum``、``average``、
+        ``count``、``min``、``max``。返回可直接修改的字典。
+        """
+        return self._totals
+
+    def resize(self, address: str) -> "Table":
+        """功能：把数据表调整为同一工作表上的新矩形区域。
+
+        使用方法：``table.resize('A1:F200')``。参数 ``address`` 为标准 A1 区域；
+        返回当前表格以支持链式调用。新区域与其他表重叠时抛出 ``ValueError``。
+        """
+        area = self._worksheet.range(address)
+        for other in self._worksheet.tables:
+            if other is self:
+                continue
+            if not (area.max_row < other.range.min_row or area.min_row > other.range.max_row
+                    or area.max_column < other.range.min_column or area.min_column > other.range.max_column):
+                raise ValueError("数据表区域不能与其他数据表重叠")
+        self._bounds = (area.min_row, area.min_column, area.max_row, area.max_column)
+        return self
+
+    def append(self, values: list[Any] | tuple[Any, ...]) -> "Table":
+        """功能：向数据表末尾追加一行并自动扩展区域。
+
+        使用方法：``table.append(['张三', 95])``。参数 ``values`` 的长度必须等于
+        表格列数；返回当前表格。表格仅含表头时追加位置为表头下一行。
+        """
+        if not isinstance(values, (list, tuple)):
+            raise TypeError("values 必须是 list 或 tuple")
+        width = self._bounds[3] - self._bounds[1] + 1
+        if len(values) != width:
+            raise ValueError(f"追加数据需要 {width} 个值")
+        row = self._bounds[2] + 1
+        for offset, value in enumerate(values):
+            self._worksheet.cell(row, self._bounds[1] + offset).value = value
+        self._bounds = (self._bounds[0], self._bounds[1], row, self._bounds[3])
+        return self
+
+    def append_rows(self, rows: Any) -> "Table":
+        """功能：批量追加多行数据。参数 ``rows`` 为可迭代的等长行序列；验证完毕后
+        写入并返回当前表格，空序列不改变区域。"""
+        prepared = list(rows)
+        width = self._bounds[3] - self._bounds[1] + 1
+        if any(not isinstance(row, (list, tuple)) or len(row) != width for row in prepared):
+            raise ValueError(f"每一行都必须包含 {width} 个值")
+        for row in prepared:
+            self.append(row)
+        return self
+
+    def clear_data(self) -> "Table":
+        """功能：清除数据表中除表头外的所有单元格，并保持表格区域。返回当前表格。"""
+        first = self._bounds[0] + (1 if self.has_header else 0)
+        for row in range(first, self._bounds[2] + 1):
+            for column in range(self._bounds[1], self._bounds[3] + 1):
+                self._worksheet.cell(row, column).value = None
+        return self
 
     def __repr__(self) -> str:
         """功能：生成包含名称、工作表和区域的调试文本。

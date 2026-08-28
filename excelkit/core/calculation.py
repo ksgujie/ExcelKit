@@ -26,6 +26,46 @@ _REFERENCE_PATTERN = re.compile(
 _STRING_PATTERN = re.compile(r'"(?:[^"]|"")*"')
 
 
+def formula_dependencies(workbook: "Workbook", worksheet: "Worksheet", formula: str) -> tuple[Any, ...]:
+    """功能：解析公式中直接引用的全部单元格。
+
+    使用方法：``cell.dependencies`` 属性内部调用；也可供扩展模块调用。
+    参数：``workbook`` 为公式所属工作簿；``worksheet`` 为默认引用工作表；
+    ``formula`` 为带或不带 ``=`` 的 Excel 公式文本。
+    返回：按公式出现顺序去重后的 ``Cell`` 元组；区域引用会展开为每个单元格，
+    跨表引用会返回对应工作表的单元格对象。
+    异常：工作表名称或地址无效时抛出原始地址异常；公式不是字符串时抛出
+    ``TypeError``。
+    """
+    if not isinstance(formula, str):
+        raise TypeError("formula 必须是字符串")
+    result: list[Any] = []
+    seen: set[tuple[int, int, int]] = set()
+    expression = formula.lstrip("=")
+    for segment in _STRING_PATTERN.split(expression)[::2]:
+        for match in _REFERENCE_PATTERN.finditer(segment):
+            quoted_sheet, plain_sheet, start, end = match.groups()
+            try:
+                start_row, start_column = cell_index(start.replace("$", ""))
+                if end is None:
+                    end_row, end_column = start_row, start_column
+                else:
+                    end_row, end_column = cell_index(end.replace("$", ""))
+            except ValueError:
+                continue
+            target = worksheet
+            sheet_name = quoted_sheet or plain_sheet
+            if sheet_name is not None:
+                target = workbook.sheet(sheet_name.replace("''", "'"))
+            for row in range(min(start_row, end_row), max(start_row, end_row) + 1):
+                for column in range(min(start_column, end_column), max(start_column, end_column) + 1):
+                    key = (id(target), row, column)
+                    if key not in seen:
+                        seen.add(key)
+                        result.append(target.cell(row, column))
+    return tuple(result)
+
+
 def _flatten(values: Iterable[Any]) -> list[Any]:
     """功能：把公式函数收到的区域和嵌套序列展开为一维参数列表。
 

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
 from ..errors import InvalidFileError, InvalidWorksheetNameError
+from ..properties import WorkbookProperties
+from ..protection import Protection
 from .worksheet import Worksheet
 from .named_range import NamedRange
 from .range import Range
@@ -22,7 +24,7 @@ _TABLE_NAME_PATTERN = re.compile(r"^(?:[^\W\d]|_)[\w.]*$", re.UNICODE)
 class Workbook:
     """表示可读取、编辑并写出 XLSX 或 XLS 文件的内存工作簿。"""
 
-    __slots__ = ("_sheets", "_sheets_by_name", "_named_ranges")
+    __slots__ = ("_sheets", "_sheets_by_name", "_named_ranges", "_properties", "_protection")
 
     def __init__(self) -> None:
         """功能：创建不含工作表的空工作簿。
@@ -34,6 +36,8 @@ class Workbook:
         self._sheets: list[Worksheet] = []
         self._sheets_by_name: Dict[str, Worksheet] = {}
         self._named_ranges: Dict[str, NamedRange] = {}
+        self._properties = WorkbookProperties()
+        self._protection = Protection()
 
     @staticmethod
     def _validate_sheet_name(name: str) -> None:
@@ -92,6 +96,34 @@ class Workbook:
         for worksheet in self._sheets:
             worksheet._formula_values.clear()
             worksheet._formula_errors.clear()
+
+    def _shift_formula_references(
+        self,
+        target: Worksheet,
+        index: int,
+        count: int,
+        *,
+        rows: bool,
+        deleting: bool,
+    ) -> None:
+        """功能：同步某张工作表行列编辑影响到工作簿内全部公式的引用。
+
+        使用方法：由 ``Worksheet`` 行列编辑方法内部调用。
+        参数：``target`` 为被编辑工作表；``index``、``count`` 为0-based位置和数量；
+        ``rows`` 表示按行编辑；``deleting`` 表示删除而非插入。
+        返回：``None``；公式表达式原地更新，缓存由调用方统一失效。
+        """
+        for worksheet in self._sheets:
+            for coordinate, formula in list(worksheet._formulas.items()):
+                worksheet._formulas[coordinate] = Worksheet._shift_formula_references(
+                    formula,
+                    index,
+                    count,
+                    rows=rows,
+                    deleting=deleting,
+                    current_sheet=target.name,
+                    formula_sheet=worksheet.name,
+                )
 
     @staticmethod
     def _validate_table_name(name: str) -> None:
@@ -326,11 +358,15 @@ class Workbook:
             "formulas": dict(source._formulas),
             "formula_values": deepcopy(source._formula_values),
             "formula_errors": dict(source._formula_errors),
+            "hyperlinks": dict(source._hyperlinks),
             "styles": dict(source._styles),
             "merged_ranges": list(source._merged_ranges),
             "rows": deepcopy(source._rows),
             "columns": deepcopy(source._columns),
             "page": deepcopy(source._page),
+            "headers": source._headers,
+            "validations": deepcopy(source._validations),
+            "conditionals": deepcopy(source._conditionals),
         }
         target = self.add_sheet(new_name)
         target._color = source._color
@@ -338,6 +374,15 @@ class Workbook:
         target._formulas = copied_state["formulas"]
         target._formula_values = copied_state["formula_values"]
         target._formula_errors = copied_state["formula_errors"]
+        target._hyperlinks = copied_state["hyperlinks"]
+        target._headers = copied_state["headers"]
+        target._validations = copied_state["validations"]
+        target._conditionals = copied_state["conditionals"]
+        target._filter_conditions = dict(source._filter_conditions)
+        target._protection.enabled = source._protection.enabled
+        target._protection.password = source._protection.password
+        target._protection.select_locked = source._protection.select_locked
+        target._protection.select_unlocked = source._protection.select_unlocked
         target._styles = copied_state["styles"]
         target._merged_ranges = copied_state["merged_ranges"]
         target._rows = copied_state["rows"]
@@ -370,6 +415,22 @@ class Workbook:
         return tuple(self._sheets)
 
     @property
+    def properties(self) -> WorkbookProperties:
+        """功能：取得当前工作簿的核心文档属性对象。
+
+        使用方法：``workbook.properties.title = "销售报表"``。
+        参数：无，只读属性；返回对象的字段可以直接修改。
+        返回：``WorkbookProperties``，同一工作簿每次访问返回同一对象。
+        """
+        return self._properties
+
+    @property
+    def protection(self) -> Protection:
+        """功能：取得工作簿保护设置对象。使用方法：``wb.protection.enabled = True``。
+        返回同一个可修改对象；保存 XLSX 时写入 workbookProtection。"""
+        return self._protection
+
+    @property
     def active(self) -> Worksheet:
         """功能：取得第一张工作表，空工作簿会自动创建 ``Sheet1``。
 
@@ -382,12 +443,25 @@ class Workbook:
         return self._sheets[0]
 
     @classmethod
-    def load(cls, filename: str | os.PathLike[str]) -> "Workbook":
+    def load(
+        cls,
+        filename: str | os.PathLike[str],
+        *,
+        encoding: str | None = None,
+        delimiter: str | None = None,
+        has_header: bool = False,
+    ) -> "Workbook":
         """功能：从常用表格文件构造全新的工作簿。
 
-        使用方法：``workbook = Workbook.load("input.xlsx")``。
+        使用方法：``workbook = Workbook.load("input.xlsx")``；读取 CSV 时可写成
+        ``Workbook.load("data.csv", encoding="gb18030", delimiter=";",
+        has_header=True)``。
         参数：``filename`` 为字符串或 ``os.PathLike`` 路径；支持 XLS、XLSX、
-        XLSM、XLTX、CSV 和 TSV。Open XML 宏内容会被忽略且不会执行。
+        XLSM、XLTX、CSV 和 TSV。``encoding`` 指定 CSV/TSV 编码，省略时自动尝试
+        UTF-8、UTF-8 BOM、GB18030；``delimiter`` 指定单字符分隔符，省略时按
+        扩展名或内容检测；``has_header`` 为真时将首行同时记录到
+        ``worksheet.headers``（首行单元格数据仍保留）。这三个参数对 XLS/XLSX
+        传入非默认值会抛出 ``ValueError``。Open XML 宏内容会被忽略且不会执行。
         返回：包含已读取工作表、普通值、公式、日期和受支持样式的新
         :class:`Workbook`；对子类调用时返回该子类实例。
         异常：文件不存在时抛出 ``FileNotFoundError``；格式不受支持或结构损坏时
@@ -395,7 +469,10 @@ class Workbook:
         """
         from ..reader import _load_workbook
 
-        return _load_workbook(cls, filename)
+        return _load_workbook(
+            cls, filename, encoding=encoding, delimiter=delimiter,
+            has_header=has_header,
+        )
 
     def save(self, filename: str | os.PathLike[str]) -> "Workbook":
         """功能：按文件扩展名将当前工作簿保存为 XLSX 或 XLS 文件。

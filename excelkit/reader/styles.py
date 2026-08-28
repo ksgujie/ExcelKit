@@ -226,4 +226,35 @@ def _read_styles(package: zipfile.ZipFile) -> Tuple[List[Style], Set[int]]:
     return styles or [DEFAULT_STYLE], date_styles
 
 
+def _read_dxf_colors(
+    package: zipfile.ZipFile,
+) -> List[Tuple[Optional[str], Optional[str]]]:
+    """功能：读取条件格式差异样式中的填充色和字体色。
+
+    使用方法：XLSX 主读取流程在解析工作表条件格式前调用。
+    参数：``package`` 为已打开的 XLSX ZIP 包。
+    返回：按 ``dxfId`` 排列的 ``(fill_color, font_color)`` 列表；没有差异样式时
+    返回空列表，缺失的单项颜色使用 ``None``。
+    异常：样式 XML 损坏时抛出 :class:`InvalidFileError`。
+    """
+    member = "xl/styles.xml"
+    if member not in package.namelist():
+        return []
+    try:
+        root = ET.fromstring(package.read(member))
+    except (KeyError, ET.ParseError) as error:
+        raise InvalidFileError("XLSX 样式表损坏") from error
+    container = root.find(_tag("dxfs"))
+    if container is None:
+        return []
+    result: List[Tuple[Optional[str], Optional[str]]] = []
+    for item in container.findall(_tag("dxf")):
+        fill_element = item.find(_tag("fill"))
+        font_element = item.find(_tag("font"))
+        fill = _fill(fill_element).color if fill_element is not None else None
+        font = _font(font_element).color if font_element is not None else None
+        result.append((fill, font))
+    return result
+
+
 __all__ = []

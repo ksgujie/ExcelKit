@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from ..address import (
     cell_address,
     cell_index,
+    column_to_index,
+    index_to_column,
     range_index,
+    range_address,
     validate_column_index,
     validate_row_index,
 )
+from ..hyperlink import Hyperlink
 from ..storage import ValueStore
 from ..style import DEFAULT_STYLE, Style, _color
 from .cell import Cell
@@ -20,6 +25,10 @@ from .dimension import ColumnDimension, RowDimension
 from .page import PageSettings
 from .range import Range
 from .table import Table
+from ..validation import Validation
+from ..conditional import ConditionalFormat
+from ..protection import Protection
+from ..filter import AutoFilter
 
 if TYPE_CHECKING:
     from .workbook import Workbook
@@ -50,15 +59,21 @@ class Worksheet:
         "_formulas",
         "_formula_values",
         "_formula_errors",
+        "_hyperlinks",
+        "_headers",
         "_styles",
         "_merged_ranges",
         "_rows",
         "_columns",
         "_freeze",
         "_filter_range",
+        "_filter_conditions",
         "_show_gridlines",
         "_page",
         "_tables",
+        "_validations",
+        "_conditionals",
+        "_protection",
         "_max_row",
         "_max_column",
     )
@@ -77,15 +92,21 @@ class Worksheet:
         self._formulas: Dict[Tuple[int, int], str] = {}
         self._formula_values: Dict[Tuple[int, int], Any] = {}
         self._formula_errors: Dict[Tuple[int, int], str] = {}
+        self._hyperlinks: Dict[Tuple[int, int], Hyperlink] = {}
+        self._headers: Optional[Tuple[Any, ...]] = None
         self._styles: Dict[Tuple[int, int], Style] = {}
         self._merged_ranges: list[Tuple[int, int, int, int]] = []
         self._rows: Dict[int, RowDimension] = {}
         self._columns: Dict[int, ColumnDimension] = {}
         self._freeze: Optional[str] = None
         self._filter_range: Optional[str] = None
+        self._filter_conditions: dict[int, tuple[str, ...]] = {}
         self._show_gridlines = True
         self._page = PageSettings()
         self._tables: Dict[str, Table] = {}
+        self._validations: list[Validation] = []
+        self._conditionals: list[ConditionalFormat] = []
+        self._protection = Protection()
         self._max_row = -1
         self._max_column = -1
 
@@ -132,6 +153,18 @@ class Worksheet:
         异常：颜色类型、长度或十六进制字符无效时抛出 ``ValueError``。
         """
         self._color = _color(color)
+
+    @property
+    def headers(self) -> Optional[Tuple[Any, ...]]:
+        """功能：取得分隔文本读取时识别出的首行表头。
+
+        使用方法：``headers = worksheet.headers``。
+        参数：无。
+        返回：启用 ``Workbook.load(..., has_header=True)`` 且来自 CSV/TSV 时，
+        返回首行字段的只读元组；普通创建或 XLS/XLSX 读取的工作表返回 ``None``。
+        返回值只是元数据，首行仍会保留在单元格中。
+        """
+        return self._headers
 
     def cell(self, row: Union[str, int], column: Optional[int] = None) -> Cell:
         """功能：按 A1 地址或 0-based 行列索引取得单元格。
@@ -253,6 +286,12 @@ class Worksheet:
         self._filter_range = Range(self, *range_index(address)).address
 
     @property
+    def auto_filter(self) -> AutoFilter:
+        """功能：取得自动筛选代理对象。使用方法：``ws.auto_filter.range = 'A1:D20'``；
+        ``ws.auto_filter.add(1, ['通过'])``。返回同一个语义代理。"""
+        return AutoFilter(self)
+
+    @property
     def show_gridlines(self) -> bool:
         """功能：读取Excel屏幕是否显示工作表网格线。
 
@@ -284,6 +323,75 @@ class Worksheet:
         返回：当前 :class:`PageSettings`。
         """
         return self._page
+
+    @property
+    def protection(self) -> Protection:
+        """功能：取得工作表保护设置对象。使用方法：``ws.protection.enabled = True``。
+        返回同一个可修改对象；保存 XLSX 时写入 sheetProtection。"""
+        return self._protection
+
+    def add_validation(self, address: str, *, kind: str = "list", values=None,
+                       operator: Optional[str] = None, formula1: Optional[str] = None,
+                       formula2: Optional[str] = None, allow_blank: bool = True,
+                       show_dropdown: bool = True, prompt_title: Optional[str] = None,
+                       prompt: Optional[str] = None, error_title: Optional[str] = None,
+                       error: Optional[str] = None, error_style: str = "stop") -> Validation:
+        """功能：为区域添加 Excel 数据有效性规则。
+
+        使用方法：``ws.add_validation('B2:B100', kind='list', values=['是','否'])``。
+        参数：``address`` 为A1区域；``kind`` 可为 list、whole、decimal、date、time、
+        textLength、custom；``values`` 为下拉候选；``formula1/formula2`` 为公式；其余
+        参数控制运算符、空值、提示和错误信息。返回新建 ``Validation``。
+        """
+        area = self.range(address)
+        validation = Validation(area.address, kind=kind, operator=operator,
+            formula1=formula1, formula2=formula2, values=values, allow_blank=allow_blank,
+            show_dropdown=show_dropdown, prompt_title=prompt_title, prompt=prompt,
+            error_title=error_title, error=error, error_style=error_style)
+        self._validations.append(validation)
+        return validation
+
+    @property
+    def validations(self) -> tuple[Validation, ...]:
+        """功能：取得当前工作表全部数据有效性规则的只读快照。"""
+        return tuple(self._validations)
+
+    def remove_validation(self, validation: Validation) -> "Worksheet":
+        """功能：删除当前工作表中的数据有效性规则。参数必须是本表规则；返回当前表。"""
+        if validation not in self._validations:
+            raise ValueError("数据有效性规则不属于当前工作表")
+        self._validations.remove(validation)
+        return self
+
+    def add_conditional_format(self, address: str, *, rule: str = "cellIs",
+                               operator: Optional[str] = None, formula: Optional[str] = None,
+                               fill: Optional[str] = None, font: Optional[str] = None,
+                               priority: Optional[int] = None, stop_if_true: bool = False) -> ConditionalFormat:
+        """功能：为区域添加条件格式规则。
+
+        使用方法：``ws.add_conditional_format('B2:B20', operator='greaterThan', formula='90', fill='FFC7CE')``。
+        参数：``address`` 为A1区域；``rule`` 为 cellIs、expression 等规则类型；其余
+        参数指定比较、公式、填充/字体颜色及优先级。返回新建 ``ConditionalFormat``。
+        """
+        area = self.range(address)
+        item = ConditionalFormat(area.address, rule=rule, operator=operator, formula=formula,
+                                 fill=fill, font=font,
+                                 priority=priority or len(self._conditionals) + 1,
+                                 stop_if_true=stop_if_true)
+        self._conditionals.append(item)
+        return item
+
+    @property
+    def conditional_formats(self) -> tuple[ConditionalFormat, ...]:
+        """功能：取得工作表全部条件格式规则的只读快照。"""
+        return tuple(self._conditionals)
+
+    def remove_conditional_format(self, item: ConditionalFormat) -> "Worksheet":
+        """功能：删除条件格式规则；参数必须来自当前工作表；返回当前工作表。"""
+        if item not in self._conditionals:
+            raise ValueError("条件格式规则不属于当前工作表")
+        self._conditionals.remove(item)
+        return self
 
     def add_table(
         self,
@@ -590,6 +698,371 @@ class Worksheet:
         validate_row_index(row)
         validate_column_index(column)
         return self._formulas.get((row, column))
+
+    def _get_hyperlink(self, row: int, column: int) -> Optional[Hyperlink]:
+        """功能：读取指定位置的超链接对象。
+
+        使用方法：由 ``Cell.hyperlink`` 读取器内部调用。
+        参数：``row``、``column`` 为 0-based 整数索引，顺序为先行后列。
+        返回：对应 ``Hyperlink`` 或 ``None``。
+        异常：索引无效时抛出 ``InvalidAddressError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        return self._hyperlinks.get((row, column))
+
+    def _set_hyperlink(
+        self, row: int, column: int, value: Optional[Hyperlink | str]
+    ) -> None:
+        """功能：校验并设置指定位置的超链接，或清除现有链接。
+
+        使用方法：由 ``Cell.hyperlink`` 设置器内部调用。
+        参数：``row``、``column`` 为 0-based 索引，顺序为先行后列；``value`` 为
+        ``Hyperlink``、网址字符串或 ``None``。
+        返回：``None``；普通值、公式和样式保持不变。
+        异常：类型、链接内容或合并位置无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        anchor = self._merged_anchor(row, column)
+        if anchor is not None and anchor != (row, column):
+            raise ValueError("只能向合并区域的左上角单元格设置超链接")
+        if value is None:
+            self._hyperlinks.pop((row, column), None)
+            return
+        if isinstance(value, str):
+            value = Hyperlink(target=value)
+        elif not isinstance(value, Hyperlink):
+            raise TypeError("hyperlink 必须是字符串、Hyperlink 或 None")
+        self._hyperlinks[(row, column)] = value
+        self._touch(row, column)
+
+    @property
+    def hyperlinks(self) -> tuple[tuple[str, Hyperlink], ...]:
+        """功能：取得当前工作表全部超链接的只读快照。
+
+        使用方法：``for address, link in worksheet.hyperlinks: ...``。
+        参数：无，只读属性。
+        返回：按行优先顺序排列的 ``(A1地址, Hyperlink)`` 元组；没有链接时返回空元组。
+        """
+        return tuple(
+            (cell_address(row, column), link)
+            for (row, column), link in sorted(self._hyperlinks.items())
+        )
+
+    @staticmethod
+    def _validate_edit_count(count: int) -> None:
+        """功能：验证行列插入或删除数量。
+
+        使用方法：由 ``insert_*`` 和 ``delete_*`` 内部调用。
+        参数：``count`` 为正整数数量，布尔值不作为整数处理。
+        返回：``None``。
+        异常：数量不是正整数时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise TypeError("count 必须是正整数")
+        if count < 1:
+            raise ValueError("count 必须是正整数")
+
+    def _validate_edit_index(self, index: int, *, deleting: bool, rows: bool) -> None:
+        """功能：验证行列编辑位置是否符合当前工作表边界。
+
+        使用方法：由行列编辑公共方法内部调用。
+        参数：``index`` 为0-based位置；``deleting`` 表示是否为删除操作；``rows``
+        表示按行还是按列验证边界。
+        返回：``None``。
+        异常：类型错误、负数或删除空白范围时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError("index 必须是0-based整数")
+        axis_max = self._max_row if rows else self._max_column
+        maximum = axis_max if deleting else axis_max + 1
+        if index < 0 or index > maximum:
+            raise ValueError("index 超出当前工作表允许范围")
+
+    @staticmethod
+    def _map_index(
+        value: int, index: int, count: int, *, deleting: bool
+    ) -> Optional[int]:
+        """功能：把一个行或列索引映射到插入或删除后的索引。
+
+        使用方法：行列内部状态重建时调用。
+        参数：``value`` 为原0-based索引；``index`` 为编辑起点；``count`` 为数量；
+        ``deleting`` 表示删除而非插入。
+        返回：新索引；被删除范围内的索引返回 ``None``。
+        """
+        if not deleting:
+            return value + count if value >= index else value
+        if index <= value < index + count:
+            return None
+        return value - count if value >= index + count else value
+
+    @classmethod
+    def _map_bounds(
+        cls,
+        bounds: Tuple[int, int, int, int],
+        index: int,
+        count: int,
+        *,
+        rows: bool,
+        deleting: bool,
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """功能：映射矩形边界并处理插入扩张或删除收缩。
+
+        使用方法：合并区域、Table 和命名区域同步时内部调用。
+        参数：``bounds`` 为最小行、最小列、最大行、最大列；``index``、``count``
+        为编辑位置和数量；``rows`` 表示按行编辑；``deleting`` 表示删除。
+        返回：调整后的边界；全部范围被删除时返回 ``None``。
+        """
+        min_row, min_column, max_row, max_column = bounds
+        if rows:
+            start, end = min_row, max_row
+        else:
+            start, end = min_column, max_column
+        if not deleting:
+            if start >= index:
+                start += count
+                end += count
+            elif end >= index:
+                end += count
+        else:
+            deleted_end = index + count - 1
+            if end < index:
+                pass
+            elif start > deleted_end:
+                start -= count
+                end -= count
+            else:
+                remaining: list[tuple[int, int]] = []
+                if start < index:
+                    remaining.append((start, index - 1))
+                if end > deleted_end:
+                    remaining.append((index, end - count))
+                if not remaining:
+                    return None
+                start = min(item[0] for item in remaining)
+                end = max(item[1] for item in remaining)
+        if rows:
+            return start, min_column, end, max_column
+        return min_row, start, max_row, end
+
+    @staticmethod
+    def _shift_formula_references(
+        formula: str,
+        index: int,
+        count: int,
+        *,
+        rows: bool,
+        deleting: bool,
+        current_sheet: str,
+        formula_sheet: str,
+    ) -> str:
+        """功能：同步行列编辑对公式 A1 引用造成的位移。
+
+        使用方法：工作表插入或删除行列时由工作簿内部调用。
+        参数：``formula`` 为原公式；其余参数描述编辑轴、位置、数量、当前工作表
+        和公式所在工作表。绝对引用也会随被编辑区域移动，符合 Excel 插入行为。
+        返回：调整后的公式；引用被删除时使用 ``#REF!``。
+        """
+        pattern = re.compile(
+            r"(?<![\w.])(?:(?:'((?:[^']|'')+)'|([A-Za-z_][\w.]*))!)?"
+            r"(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)(?![\w.])"
+        )
+        current_key = current_sheet.casefold()
+
+        def replace(match: re.Match[str]) -> str:
+            """功能：替换公式中的一个单格引用。
+
+            使用方法：由正则替换器自动调用。
+            参数：``match`` 为引用正则匹配对象。
+            返回：原引用或调整后的 A1 引用文本。
+            """
+            quoted, plain, column_absolute, column, row_absolute, row_text = match.groups()
+            referenced_sheet = (quoted or plain or formula_sheet).replace("''", "'")
+            if referenced_sheet.casefold() != current_key:
+                return match.group(0)
+            number = int(row_text) if rows else column_to_index(column)
+            start = index + 1 if rows else index
+            end = index + count if rows else index + count - 1
+            if deleting and start <= number <= end:
+                return "#REF!"
+            if (not deleting and number >= start) or (deleting and number > end):
+                number += count if not deleting else -count
+            if rows:
+                if not 1 <= number <= 1048576:
+                    return "#REF!"
+                if quoted is not None:
+                    prefix = f"'{quoted}'!"
+                elif plain is not None:
+                    prefix = f"{plain}!"
+                else:
+                    prefix = ""
+                return prefix + column_absolute + column + row_absolute + str(number)
+            if not 0 <= number < 16384:
+                return "#REF!"
+            if quoted is not None:
+                prefix = f"'{quoted}'!"
+            elif plain is not None:
+                prefix = f"{plain}!"
+            else:
+                prefix = ""
+            return prefix + column_absolute + index_to_column(number) + row_absolute + row_text
+
+        pieces = re.split(r'("(?:[^"]|"")*")', formula)
+        return "".join(
+            piece if offset % 2 else pattern.sub(replace, piece)
+            for offset, piece in enumerate(pieces)
+        )
+
+    def _edit_axis(self, index: int, count: int, *, rows: bool, deleting: bool) -> "Worksheet":
+        """功能：统一执行行列插入或删除并重建工作表稀疏状态。
+
+        使用方法：由 ``insert_rows``、``delete_rows``、``insert_columns`` 和
+        ``delete_columns`` 调用；业务代码应使用四个公开方法。
+        参数：``index`` 为0-based起点；``count`` 为数量；``rows`` 选择行或列；
+        ``deleting`` 选择删除或插入。
+        返回：当前 ``Worksheet``，支持链式调用。
+        异常：参数无效或删除范围超出边界时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        self._validate_edit_count(count)
+        self._validate_edit_index(index, deleting=deleting, rows=rows)
+        if deleting:
+            maximum = self._max_row if rows else self._max_column
+            if index + count - 1 > maximum:
+                raise ValueError("删除范围超出当前工作表边界")
+        axis_max = self._max_row if rows else self._max_column
+        coordinate_maps = (
+            self._values._values,
+            self._formulas,
+            self._formula_values,
+            self._formula_errors,
+            self._hyperlinks,
+            self._styles,
+        )
+        for mapping in coordinate_maps:
+            rebuilt = {}
+            for (row, column), value in mapping.items():
+                selected = row if rows else column
+                mapped = self._map_index(selected, index, count, deleting=deleting)
+                if mapped is None:
+                    continue
+                coordinate = (mapped, column) if rows else (row, mapped)
+                rebuilt[coordinate] = value
+            mapping.clear()
+            mapping.update(rebuilt)
+        if rows:
+            dimensions, max_name = self._rows, "_max_row"
+        else:
+            dimensions, max_name = self._columns, "_max_column"
+        rebuilt_dimensions = {}
+        for selected, dimension in dimensions.items():
+            mapped = self._map_index(selected, index, count, deleting=deleting)
+            if mapped is not None:
+                dimension._index = mapped
+                rebuilt_dimensions[mapped] = dimension
+        dimensions.clear()
+        dimensions.update(rebuilt_dimensions)
+        mapped_ranges = []
+        for bounds in self._merged_ranges:
+            mapped = self._map_bounds(bounds, index, count, rows=rows, deleting=deleting)
+            if mapped is not None and not (mapped[0] == mapped[2] and mapped[1] == mapped[3]):
+                mapped_ranges.append(mapped)
+        self._merged_ranges = sorted(mapped_ranges)
+        for table in self.tables:
+            mapped = self._map_bounds(table._bounds, index, count, rows=rows, deleting=deleting)
+            if mapped is None:
+                self.remove_table(table.name)
+            else:
+                table._bounds = mapped
+        for named_range in self._workbook.named_ranges:
+            if named_range.worksheet is self:
+                mapped = self._map_bounds(named_range._bounds, index, count, rows=rows, deleting=deleting)
+                if mapped is not None:
+                    named_range._bounds = mapped
+        mapped_validations = []
+        for item in self._validations:
+            mapped = self._map_bounds(range_index(item.range), index, count, rows=rows, deleting=deleting)
+            if mapped is not None:
+                item.range = range_address(*mapped)
+                mapped_validations.append(item)
+        self._validations = mapped_validations
+        mapped_conditionals = []
+        for item in self._conditionals:
+            mapped = self._map_bounds(range_index(item.range), index, count, rows=rows, deleting=deleting)
+            if mapped is not None:
+                item.range = range_address(*mapped)
+                mapped_conditionals.append(item)
+        self._conditionals = mapped_conditionals
+        if self._freeze is not None:
+            freeze_row, freeze_column = cell_index(self._freeze)
+            mapped = self._map_index(freeze_row if rows else freeze_column, index, count, deleting=deleting)
+            if mapped is not None:
+                self._freeze = cell_address(mapped, freeze_column) if rows else cell_address(freeze_row, mapped)
+        if self._filter_range is not None:
+            bounds = range_index(self._filter_range)
+            mapped = self._map_bounds(bounds, index, count, rows=rows, deleting=deleting)
+            self._filter_range = range_address(*mapped) if mapped is not None else None
+        if self._page.print_area is not None:
+            bounds = range_index(self._page.print_area)
+            mapped = self._map_bounds(bounds, index, count, rows=rows, deleting=deleting)
+            self._page.print_area = range_address(*mapped) if mapped is not None else None
+        if rows and self._page.repeat_rows is not None:
+            start, end = self._page.repeat_rows
+            mapped = self._map_bounds((start, 0, end, 0), index, count, rows=True, deleting=deleting)
+            self._page.repeat_rows = None if mapped is None else (mapped[0], mapped[2])
+        if not rows and self._page.repeat_columns is not None:
+            start, end = self._page.repeat_columns
+            mapped = self._map_bounds((0, start, 0, end), index, count, rows=False, deleting=deleting)
+            self._page.repeat_columns = None if mapped is None else (mapped[1], mapped[3])
+        self._workbook._shift_formula_references(
+            self, index, count, rows=rows, deleting=deleting
+        )
+        if deleting:
+            setattr(self, max_name, max(-1, axis_max - count))
+        else:
+            setattr(self, max_name, axis_max + count)
+        self._workbook._invalidate_formula_caches()
+        return self
+
+    def insert_rows(self, index: int, count: int = 1) -> "Worksheet":
+        """功能：在指定0-based行索引前插入一个或多个空行。
+
+        使用方法：``worksheet.insert_rows(2, count=3)``。
+        参数：``index`` 为插入位置，允许取到当前最大行索引加1；``count`` 为正整数。
+        返回：当前工作表。
+        异常：参数无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._edit_axis(index, count, rows=True, deleting=False)
+
+    def delete_rows(self, index: int, count: int = 1) -> "Worksheet":
+        """功能：删除指定0-based起点开始的连续行。
+
+        使用方法：``worksheet.delete_rows(2, count=3)``。
+        参数：``index`` 为删除起点；``count`` 为正整数，删除范围必须已触及。
+        返回：当前工作表。
+        异常：范围越界或参数无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._edit_axis(index, count, rows=True, deleting=True)
+
+    def insert_columns(self, index: int, count: int = 1) -> "Worksheet":
+        """功能：在指定0-based列索引前插入一个或多个空列。
+
+        使用方法：``worksheet.insert_columns(1, count=2)``。
+        参数：``index`` 为插入位置，允许取到当前最大列索引加1；``count`` 为正整数。
+        返回：当前工作表。
+        异常：参数无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._edit_axis(index, count, rows=False, deleting=False)
+
+    def delete_columns(self, index: int, count: int = 1) -> "Worksheet":
+        """功能：删除指定0-based起点开始的连续列。
+
+        使用方法：``worksheet.delete_columns(1, count=2)``。
+        参数：``index`` 为删除起点；``count`` 为正整数，删除范围必须已触及。
+        返回：当前工作表。
+        异常：范围越界或参数无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._edit_axis(index, count, rows=False, deleting=True)
 
     def _set_formula(
         self, row: int, column: int, formula: Optional[str], *, invalidate: bool = True

@@ -1,6 +1,6 @@
-# ExcelKit 0.4.0 完整中文使用与 API 手册
+# ExcelKit 0.5.0 完整中文使用与 API 手册
 
-版本：0.4.0
+版本：0.5.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,7 +8,7 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.4.0-py3-none-any.whl
+pip install excelkit-0.5.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -27,6 +27,11 @@ from excelkit.style import Style, Border, BorderSide, Alignment
 from excelkit.page_setup import PageSettings, PageMargins, HeaderFooter
 from excelkit.address import cell_index, cell_address
 from excelkit.errors import InvalidAddressError
+from excelkit.hyperlink import Hyperlink
+from excelkit.validation import Validation
+from excelkit.conditional import ConditionalFormat
+from excelkit.filter import AutoFilter
+from excelkit.protection import Protection
 ```
 
 ## 2. 必须先了解的索引规则
@@ -52,6 +57,72 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
+## 3.1 0.5.0 新增功能速查
+
+### 读取 CSV/TSV
+
+`Workbook.load(filename, *, encoding=None, delimiter=None, has_header=False)` 只对
+CSV/TSV 使用后三个参数。`encoding` 可指定 `gb18030`、`utf-8-sig` 等编码；省略时
+自动尝试 UTF-8 BOM、UTF-8、GB18030。`delimiter` 必须是单字符；`has_header=True`
+会把首行另存为 `worksheet.headers`，但不会删除首行数据。
+
+```python
+wb = Workbook.load("成绩.csv", encoding="gb18030", delimiter=";", has_header=True)
+assert wb.active.headers == ("姓名", "成绩")
+```
+
+### 行列编辑
+
+```python
+ws.insert_rows(2, count=3)       # 在0-based第2行前插入三行
+ws.delete_columns(1)             # 删除0-based第1列
+```
+
+行列编辑会同步单元格、公式引用、样式、合并区域、表格、命名区域、打印区域和
+冻结窗格；被删除的公式引用会变为 `#REF!`。
+
+### 超链接
+
+```python
+from excelkit.hyperlink import Hyperlink
+ws["A1"].hyperlink = "https://example.com"
+ws["A2"].hyperlink = Hyperlink(location="统计!A1", display="跳转")
+```
+
+### 文档属性和保护
+
+```python
+wb.properties.title = "月度报告"
+wb.properties.author = "ExcelKit"
+wb.protection.enabled = True
+ws.protection.enabled = True
+ws.protection.password = "demo"
+```
+
+### 数据表增强
+
+```python
+table = ws.add_table("A1:B2", name="Scores")
+print(table.columns)
+table.append(["王五", 100]).append_rows([["赵六", 88]])
+table.resize("A1:B20")
+table.show_totals = True
+table.totals["成绩"] = "average"
+table.clear_data()
+```
+
+### 数据有效性、条件格式和筛选
+
+```python
+ws.add_validation("B2:B100", kind="list", values=["通过", "不通过"])
+ws.add_conditional_format("B2:B100", operator="greaterThan", formula="90", fill="C6EFCE")
+ws.auto_filter.range = "A1:C100"
+ws.auto_filter.add(1, ["通过"])
+```
+
+这些规则均会写入标准 XLSX XML，并可由 `Workbook.load()` 读取回来；`.xls` 写出受
+`xlwt` 能力限制，规则和超链接等高级设置可能被忽略。
+
 ## 3. 顶层版本 API
 
 ### `excelkit.__version__`
@@ -65,7 +136,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.4.0"
+assert excelkit.__version__ == "0.5.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -286,7 +357,7 @@ workbook.remove_named_range("SalesAmount")
 
 命名区域定义支持 XLSX 保存和读取。旧版 XLS 保存只写出单元格数据，不保留本对象。
 
-### `Workbook.load(filename)`
+### `Workbook.load(filename, *, encoding=None, delimiter=None, has_header=False)`
 
 功能：类方法；从已有表格文件创建新的工作簿。这是唯一公开读取入口，必须通过类
 调用，不需要先构造空工作簿。
@@ -295,11 +366,18 @@ workbook.remove_named_range("SalesAmount")
 
 - `filename: str | os.PathLike`：源文件路径。支持 `.xls`、`.xlsx`、`.xlsm`、
   `.xltx`、`.csv` 和 `.tsv`，扩展名不区分大小写。
+- `encoding: str | None = None`：仅 CSV/TSV 使用。指定文本编码；省略时依次尝试
+  `utf-8-sig`、`utf-8` 和 `gb18030`。
+- `delimiter: str | None = None`：仅 CSV/TSV 使用。指定一个字符的字段分隔符；省略
+  时 TSV 使用制表符，CSV 自动检测并回退为逗号。
+- `has_header: bool = False`：仅 CSV/TSV 使用。为 `True` 时首行仍会写入工作表，
+  同时以只读元数据 `worksheet.headers` 返回该行字段元组。
 
 返回：新的 `Workbook`。对子类调用时返回该子类实例。
 
 异常：文件不存在时抛出 `FileNotFoundError`；文件损坏、加密、结构无效或格式不受
-支持时抛出 `InvalidFileError`。
+支持时抛出 `InvalidFileError`；在 XLS/XLSX 等非分隔文本格式中为后三个参数传入
+非默认值时抛出 `ValueError`。
 
 示例：
 
@@ -318,7 +396,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.4.0 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.5.0 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -917,6 +995,9 @@ Workbook 内必须唯一。
 | `has_header` | `bool` | 可读写，首行是否作为表头 |
 | `show_row_stripes` | `bool` | 可读写，是否显示隔行条纹 |
 | `show_column_stripes` | `bool` | 可读写，是否显示隔列条纹 |
+| `columns` | `tuple[str, ...]` | 只读，按表头生成的唯一列名称 |
+| `show_totals` | `bool` | 可读写，是否让 Excel 显示表格汇总行 |
+| `totals` | `dict[str, str]` | 可读写映射，键为列名，值为 `sum`、`average`、`count`、`min`、`max` 等 Excel 汇总函数 |
 
 ```python
 assert worksheet.table("salestable") is table
@@ -925,8 +1006,28 @@ table.show_column_stripes = True
 worksheet.remove_table("SalesTable")
 ```
 
-Table 定义支持 XLSX 保存和读取。旧版 XLS 不支持本对象；保存为 `.xls` 时只保留
-区域单元格和后端可表达的基础样式。当前版本不提供总计行、计算列或结构化引用计算。
+### `Table.resize(address)` / `append(values)` / `append_rows(rows)` / `clear_data()`
+
+功能：调整表格区域、在表尾追加一行/多行，或清除表头以外的表格数据。
+
+参数：`resize()` 的 `address` 必须是本工作表中且不与其他 Table 重叠的 A1 矩形；
+`append()` 的 `values` 是与表格列数完全一致的 `list` 或 `tuple`；`append_rows()`
+接收由等宽行组成的可迭代对象；`clear_data()` 无参数。
+
+返回：均返回当前 `Table`，可链式调用。形状或区域错误时抛出 `ValueError`，类型
+错误时抛出 `TypeError`。
+
+```python
+table.append(["王五", 95]).append_rows([["赵六", 88]])
+table.resize("A1:B100")
+table.show_totals = True
+table.totals["成绩"] = "average"
+table.clear_data()
+```
+
+Table 定义、区域、汇总行和汇总函数支持 XLSX 保存和读取。旧版 XLS 不支持本对象；
+保存为 `.xls` 时只保留区域单元格和后端可表达的基础样式。当前版本不提供计算列或
+结构化引用计算。
 
 ### `Worksheet.max_row`
 
@@ -2261,14 +2362,114 @@ assert list(store.items()) == [((0, 0), "A1")]
 python -m examples.02_cell_formula
 ```
 
-## 16. 0.4.0 能力边界
+## 15.1 0.5.0 工作表高级 API
 
-0.4.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
-公式表达式恢复、页眉页脚图片、普通图片、图表、条件格式、数据验证、筛选条件执行、
+### `Worksheet.insert_rows(index, count=1)` / `delete_rows(index, count=1)`
+
+功能：在指定 0-based 行前插入空行，或删除起始行开始的连续行。`index` 必须是
+0-based 非负整数，`count` 是正整数；插入允许位置等于当前最大行索引加 1，删除范围
+必须已触及且不越界。返回当前 `Worksheet`。参数错误抛出 `TypeError` 或 `ValueError`。
+
+### `Worksheet.insert_columns(index, count=1)` / `delete_columns(index, count=1)`
+
+功能、参数和返回规则与行操作相同，但 `index` 是 0-based 列索引。四个结构编辑方法会
+同步值、公式、缓存、样式、超链接、行列尺寸、合并区域、命名区域、Table、验证规则、
+条件格式、打印区域、重复标题和冻结位置；引用到被删除单元格的公式会改写为 `#REF!`。
+
+```python
+worksheet.insert_rows(1, count=2)       # 在 Excel 第 2 行前插入两行
+worksheet.delete_columns(0)             # 删除 A 列
+```
+
+### `Cell.dependencies` / `Cell.dependents`
+
+功能：前者返回当前公式直接引用的单元格，后者返回整个工作簿中直接引用当前单元格的
+公式单元格。两者均为只读 `tuple[Cell, ...]`，不触发 `Workbook.calculate()`，普通值
+单元格的 `dependencies` 为空元组。区域引用会按行、列顺序展开；跨工作表引用返回实际
+所属工作表的 Cell。
+
+```python
+worksheet["C1"].formula = "=A1+B1"
+[cell.address for cell in worksheet["C1"].dependencies]  # ['A1', 'B1']
+[cell.address for cell in worksheet["A1"].dependents]    # ['C1']
+```
+
+### `Cell.hyperlink` 与 `Hyperlink`
+
+功能：`cell.hyperlink` 可读取、设置和清除单元格超链接。设置时接受网址字符串、
+`Hyperlink` 或 `None`；字符串表示外部目标，`None` 清除链接。`Hyperlink` 的
+`target` 是外部 URL/文件目标，`location` 是工作簿内部位置，两者必须且只能设置其一；
+`display` 为显示文本，`tooltip` 为提示文本。类型或空字符串错误会抛出 `TypeError`
+或 `ValueError`。
+
+```python
+from excelkit.hyperlink import Hyperlink
+
+worksheet["A1"].hyperlink = "https://example.com"
+worksheet["A2"].hyperlink = Hyperlink(location="统计!A1", display="查看统计")
+worksheet["A1"].hyperlink = None
+```
+
+### `Workbook.properties` / `Workbook.protection` / `Worksheet.protection`
+
+功能：`properties` 返回唯一的 `WorkbookProperties`，可设置 `title`、`subject`、
+`author`、`keywords`、`comments`、`category`、`created`、`modified` 与
+`last_modified_by`。所有文本字段是字符串，两个时间字段是 `datetime | None`。
+`protection` 返回 `Protection`，可设置 `enabled`、`password`、`select_locked`、
+`select_unlocked`。这些设置会写入 XLSX；它们是 Excel 的编辑保护标志，不是加密。
+
+```python
+workbook.properties.title = "销售月报"
+workbook.properties.author = "财务部"
+worksheet.protection.enabled = True
+worksheet.protection.password = "A1B2"
+```
+
+### `Worksheet.add_validation(...)` / `validations` / `remove_validation(validation)`
+
+功能：创建、枚举、删除数据验证规则。`address` 为 A1 区域，`kind` 可为 `list`、
+`whole`、`decimal`、`date`、`time`、`textLength`、`custom`。`values` 定义下拉候选，
+`formula1`、`formula2` 定义边界或自定义表达式，`operator` 定义比较方式；
+`allow_blank`、`show_dropdown` 与提示、错误标题/文本控制 Excel 展示。返回新建
+`Validation`，`validations` 返回只读元组，删除方法返回当前工作表。
+
+```python
+rule = worksheet.add_validation("C2:C100", kind="list", values=["通过", "不通过"])
+worksheet.remove_validation(rule)
+```
+
+### `Worksheet.add_conditional_format(...)` / `conditional_formats`
+
+功能：创建条件格式规则。`address` 是区域，`rule` 默认 `cellIs`，`operator` 和
+`formula` 定义条件；`fill`、`font` 接受 6 位 RGB 或 8 位 ARGB 十六进制颜色，6 位
+颜色会补齐不透明 `FF`；`priority` 为正整数，省略时按创建顺序分配，`stop_if_true`
+控制是否停止后续规则。返回 `ConditionalFormat`；`conditional_formats` 返回只读元组。
+
+```python
+worksheet.add_conditional_format(
+    "B2:B100", operator="greaterThan", formula="90", fill="C6EFCE", font="006100"
+)
+```
+
+### `Worksheet.auto_filter`
+
+功能：返回 `AutoFilter` 代理。其 `range` 可读写筛选 A1 区域，`filters` 返回以
+区域内 0-based 列偏移为键的筛选值字典；`add(column, values)` 设置一个值筛选并返回
+代理，`clear()` 清除区域及全部条件。`column` 不能为负数或布尔值。
+
+```python
+worksheet.auto_filter.range = "A1:D100"
+worksheet.auto_filter.add(2, ["通过", "待审核"])
+```
+
+## 16. 0.5.0 能力边界
+
+0.5.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+公式表达式恢复、页眉页脚图片、普通图片、图表、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.4.0
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.5.0
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2298,21 +2499,26 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.4.0 API 速查表
+## 18. 0.5.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`show_gridlines`、`page`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`append`、`append_rows`、`[]` |
+| `Worksheet` | `name`、`color`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`show_gridlines`、`page`、`protection`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |
 | `NamedRange` | `name`、`worksheet`、`range` |
-| `Table` | `name`、`worksheet`、`range`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes` |
+| `Table` | `name`、`worksheet`、`range`、`columns`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`resize`、`append`、`append_rows`、`clear_data` |
 | 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
 | `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`range_index`、`range_address`、`cell_address` |
 | `excelkit.errors` | `ExcelKitError`、`InvalidAddressError`、`InvalidWorksheetNameError`、`InvalidFileError`、`TemplateError`、`FormulaCalculationError` |
+| `excelkit.hyperlink` | `Hyperlink` |
+| `excelkit.validation` | `Validation` |
+| `excelkit.conditional` | `ConditionalFormat` |
+| `excelkit.filter` | `AutoFilter` |
+| `excelkit.protection` | `Protection` |
 
 0.3.0 起顶层仅保留核心对象；样式、页面、地址和异常分别从 `excelkit.style`、
 `excelkit.page_setup`、`excelkit.address` 和 `excelkit.errors` 导入。`label`、
