@@ -1,6 +1,6 @@
-# ExcelKit 0.6.0 完整中文使用与 API 手册
+# ExcelKit 0.7.0 完整中文使用与 API 手册
 
-版本：0.6.0
+版本：0.7.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 1. 安装与导入
@@ -8,7 +8,7 @@
 安装 wheel：
 
 ```bash
-pip install excelkit-0.6.0-py3-none-any.whl
+pip install excelkit-0.7.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -61,7 +61,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 与 0.6.0 新增功能速查
+## 3.1 0.5.0 至 0.7.0 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -140,7 +140,7 @@ ws.auto_filter.add(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.6.0"
+assert excelkit.__version__ == "0.7.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -400,7 +400,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.6.0 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.7.0 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -651,21 +651,27 @@ assert worksheet["A3"].value is None
 工作簿引用以及未列出的函数仍应交给 Excel/WPS 计算。XLSX 保存时会携带现有缓存并
 声明自动重算，因此打开文件后表格软件可用完整引擎更新结果。
 
-### `Workbook.save(filename)`
+### `Workbook.save(filename, *, encoding="utf-8-sig", delimiter=None, formulas=False)`
 
-功能：按扩展名把工作簿原子写出为 XLSX 或 XLS 文件。序列化失败时不会损坏已有
-目标文件。
+功能：按扩展名把工作簿原子写出为 XLSX、XLS、CSV 或 TSV 文件。Excel 文件采用
+原子写出；CSV/TSV 直接流式写出文本文件。
 
 参数：
 
-- `filename: str | os.PathLike`：目标文件路径；只接受 `.xlsx` 或 `.xls`，扩展名
-  不区分大小写；父目录必须存在。
+- `filename: str | os.PathLike`：目标文件路径；接受 `.xlsx`、`.xls`、`.csv` 或
+  `.tsv`，扩展名不区分大小写；父目录必须存在。
+- `encoding: str`：仅 CSV/TSV 使用的文本编码，默认 `utf-8-sig`，可改用
+  `gb18030` 等 Python 支持的编码。
+- `delimiter: str | None`：仅 CSV/TSV 使用；为 `None` 时按扩展名使用逗号或制表符，
+  否则必须是单字符。
+- `formulas: bool`：仅 CSV/TSV 使用；`False` 导出公式缓存值，`True` 导出公式文本。
 
 返回：当前 `Workbook`，可以链式调用。
 
-异常：路径类型错误时抛出 `TypeError`；扩展名不是 `.xlsx` 或 `.xls` 时抛出
-`InvalidFileError`，且不会创建文件或延迟创建 `Sheet1`；父目录不存在、无权限或
-文件系统失败时透传对应异常。
+异常：路径类型错误时抛出 `TypeError`；扩展名不受支持时抛出 `InvalidFileError`；
+CSV/TSV 导出时工作簿不是恰好一张表也抛出 `InvalidFileError`，以防止静默丢失数据。
+对 XLS/XLSX 使用 `encoding`、`delimiter` 或 `formulas` 抛出 `ValueError`；父目录
+不存在、无权限或文件系统失败时透传对应异常。
 
 示例：
 
@@ -676,6 +682,7 @@ result = workbook.save(Path("成绩.xlsx"))
 assert result is workbook
 
 workbook.save("兼容旧版.xls")
+workbook.save("单表数据.csv", encoding="utf-8-sig")
 ```
 
 XLS 限制：最多 65536 行、256 列和 56 种自定义调色板颜色；超过限制时抛出
@@ -2588,14 +2595,92 @@ worksheet["D3"].formula = "=XLOOKUP(A3,A2:A13,B2:B13,0)"
 workbook.calculate(strict=True)
 ```
 
-## 16. 0.6.0 能力边界
+## 15.3 0.7.0 数据查找、替换与文本导出 API
 
-0.6.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+### `Worksheet.find(query, *, match_case=False, whole=False, in_formulas=False)`
+
+功能：在工作表已经使用的区域内查找全部匹配单元格。普通模式只搜索普通值；
+`in_formulas=True` 时只搜索公式文本。返回按行优先排序的 `Cell` 元组，找不到时返回
+空元组。字符串默认不区分大小写并支持包含匹配；`whole=True` 改为完整匹配。数字、日期
+等非字符串值一律按 Python 相等比较。`query` 不能为 `None` 或空字符串。
+
+```python
+matches = worksheet.find("张三")
+for cell in matches:
+    print(cell.address, cell.value)
+
+# 只查找公式文本；注意公式带有前导等号。
+sum_cells = worksheet.find("SUM", in_formulas=True)
+strict_name = worksheet.find("张三", whole=True, match_case=True)
+```
+
+### `Worksheet.replace(query, replacement, *, match_case=False, whole=False, in_formulas=False, limit=None)`
+
+功能：按 `find()` 完全相同的查找规则批量替换普通值或公式文本，返回实际替换的**单元格
+数量**。字符串的部分匹配在一个单元格中可替换多次，但该单元格只计一次；`limit` 限制
+被修改的单元格数，必须为非负整数，`0` 表示不替换。替换普通字符串片段时
+`replacement` 也必须为字符串；替换公式时 `replacement` 必须为字符串。
+
+```python
+# "旧公司" 的所有出现处改成 "新公司"。
+count = worksheet.replace("旧公司", "新公司")
+
+# 只修改第一个完整匹配的状态值。
+worksheet.replace("待审核", "已审核", whole=True, limit=1)
+
+# 公式文本替换；应谨慎确认替换后的公式语义。
+worksheet.replace("SUM", "AVERAGE", in_formulas=True)
+```
+
+### `Worksheet.export(filename, *, encoding="utf-8-sig", delimiter=None, formulas=False)`
+
+功能：把当前一张工作表导出为 `.csv` 或 `.tsv`。默认 UTF-8 BOM 可直接被常见 Excel
+版本识别为 UTF-8；`delimiter` 可传一个单字符以覆盖扩展名默认的逗号或制表符。
+`formulas=False`（默认）写出公式缓存值；未计算的公式会导出为空字段。传入
+`formulas=True` 则原样写出 `=SUM(...)` 等公式文本。返回当前工作表。
+
+```python
+worksheet.export("销售明细.csv")
+worksheet.export("销售公式.tsv", formulas=True)
+worksheet.export("分号文本.csv", encoding="gb18030", delimiter=";")
+```
+
+### `Workbook.save()` 的 CSV/TSV 支持
+
+`Workbook.save()` 也可以直接保存 `.csv` 或 `.tsv`，参数与 `Worksheet.export()` 一致：
+`encoding`、`delimiter`、`formulas`。为防止多工作表数据被静默丢弃，工作簿必须**恰好
+包含一张工作表**，否则会抛出 `InvalidFileError`。这些文本参数用于 `.xlsx` 或 `.xls`
+时会抛出 `ValueError`。
+
+```python
+single_sheet_book.save("导出.csv", formulas=False)
+```
+
+### `Range.clear(..., hyperlinks=False, notes=False)`
+
+`Range.clear()` 保留原有默认含义：清除普通值、公式、缓存结果、计算错误与样式。0.7.0
+新增 `hyperlinks`、`notes` 两个默认关闭的布尔开关，因此旧代码的行为不变。需要完整清理
+单元格附属信息时显式开启：
+
+```python
+worksheet.range("A2:C100").clear(
+    values=True,
+    styles=True,
+    hyperlinks=True,
+    notes=True,
+)
+```
+
+合并关系、行高、列宽、筛选和图表不会被 `Range.clear()` 改变。
+
+## 16. 0.7.0 能力边界
+
+0.7.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.6.0
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.7.0
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2621,16 +2706,19 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 | 复制等尺寸区域 | `source.copy_to(target)` | 可独立控制值、公式和样式 |
 | 给区域定义业务名称 | `workbook.add_named_range(name, area)` | 名称属于整个工作簿 |
 | 创建 Excel 数据表 | `worksheet.add_table(address, name=...)` | Table 属于所在工作表 |
+| 在值或公式中定位单元格 | `worksheet.find(query, ...)` | 返回可继续读取或修改的 `Cell` 元组 |
+| 批量替换数据 | `worksheet.replace(query, replacement, ...)` | 可控制大小写、完整匹配、公式与上限 |
+| 导出单张表为文本 | `worksheet.export("data.csv")` | 不会受到工作簿其他工作表影响 |
 
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.6.0 API 速查表
+## 18. 0.7.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`find`、`replace`、`export`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |

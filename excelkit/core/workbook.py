@@ -498,31 +498,54 @@ class Workbook:
             has_header=has_header,
         )
 
-    def save(self, filename: str | os.PathLike[str]) -> "Workbook":
-        """功能：按文件扩展名将当前工作簿保存为 XLSX 或 XLS 文件。
+    def save(
+        self,
+        filename: str | os.PathLike[str],
+        *,
+        encoding: str = "utf-8-sig",
+        delimiter: str | None = None,
+        formulas: bool = False,
+    ) -> "Workbook":
+        """功能：按文件扩展名将当前工作簿保存为 Excel、CSV 或 TSV 文件。
 
-        使用方法：``workbook.save("成绩.xlsx")``，也可传入 ``pathlib.Path``。
+        使用方法：``workbook.save("成绩.xlsx")``；单工作表也可使用
+        ``workbook.save("成绩.csv", formulas=True)``。
         参数：``filename`` 为字符串或实现 ``os.PathLike`` 的目标文件路径；
         ``.xls`` 使用 Excel 97–2003 格式，``.xlsx`` 使用 Open XML 格式；扩展名
-        不区分大小写，其他扩展名不会被写出。
+        不区分大小写。``.csv``、``.tsv`` 仅可用于恰好一张工作表，``encoding``
+        默认为 Excel 兼容的 UTF-8 BOM，``delimiter`` 可覆盖默认分隔符，``formulas``
+        为真时导出公式文本。三个文本参数不适用于 Excel 文件。
         返回：当前 :class:`Workbook`，用于链式调用。
-        异常：扩展名不是 ``.xlsx`` 或 ``.xls`` 时抛出 ``InvalidFileError``；路径
-        不可写时透传文件系统异常。扩展名验证失败不会延迟创建 ``Sheet1``。
+        异常：扩展名不受支持、多表导出文本或 Excel 文件使用文本参数时抛出
+        ``InvalidFileError`` 或 ``ValueError``；路径不可写时透传文件系统异常。
+        扩展名验证失败不会延迟创建 ``Sheet1``。
         """
         if not isinstance(filename, (str, os.PathLike)):
             raise TypeError("filename 必须是字符串或 PathLike 对象")
         suffix = Path(filename).suffix.lower()
-        if suffix not in {".xlsx", ".xls"}:
+        if suffix not in {".xlsx", ".xls", ".csv", ".tsv"}:
             raise InvalidFileError(
                 f"不支持的工作簿保存格式：{suffix or '无扩展名'}"
             )
         if not self._sheets:
             self.active
+        if suffix in {".csv", ".tsv"}:
+            if len(self._sheets) != 1:
+                raise InvalidFileError("CSV/TSV 导出要求工作簿恰好包含一张工作表")
+            from ..writer.delimited import write_delimited
+
+            write_delimited(
+                self._sheets[0], filename, encoding=encoding,
+                delimiter=delimiter, formulas=formulas,
+            )
+        else:
+            if encoding != "utf-8-sig" or delimiter is not None or formulas:
+                raise ValueError("encoding、delimiter、formulas 仅适用于 CSV/TSV 文件")
         if suffix == ".xls":
             from ..writer.xls import XlsWriter
 
             XlsWriter(self).write(filename)
-        else:
+        elif suffix == ".xlsx":
             from ..writer.xlsx import XlsxWriter
 
             XlsxWriter(self).write(filename)

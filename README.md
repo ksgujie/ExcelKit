@@ -1,14 +1,14 @@
-# ExcelKit 0.6.0
+# ExcelKit 0.7.0
 
-ExcelKit 是一个使用清晰对象模型读写 XLSX 与 XLS 文件的轻量级库。
+ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.6.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.7.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.6.0-py3-none-any.whl
+pip install excelkit-0.7.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -66,8 +66,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `render(data=None, *, sheet_data=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
 - `calculate(*, strict=False)`：在 Python 中计算当前支持的公式并更新缓存结果。
-- `save(filename)`：只按 `.xlsx` 或 `.xls` 扩展名保存并返回当前工作簿；其他
-  扩展名抛出 `InvalidFileError`。
+- `save(filename, *, encoding=..., delimiter=..., formulas=False)`：保存 XLSX、XLS；
+  单工作表还可保存 CSV/TSV。
 
 ### Worksheet
 
@@ -90,6 +90,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `add_chart(chart_type, anchor=...)`、`charts`：创建柱状、条形、折线或饼图。
 - `add_image(filename, anchor=...)`、`images`：插入 PNG/JPEG 图片。
 - `cell.note`：读取、设置或清除传统单元格批注。
+- `find(query, ...)`、`replace(query, replacement, ...)`：在值或公式中查找、批量替换。
+- `export(filename, ...)`：导出当前工作表为 CSV/TSV。
 - `show_gridlines`：控制屏幕网格线。
 - `page`：页面布局与打印设置唯一入口。
 - `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表；Table 支持
@@ -432,12 +434,12 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.6.0 能力边界
+## 0.7.0 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域
 批量操作、基础样式、命名区域、基础 Table、模板安全数值表达式、XLS/XLSX 读写及
-CSV/TSV 读取、超链接、传统批注、数据验证、条件格式、筛选条件、保护、文档属性、
+CSV/TSV 读写、超链接、传统批注、数据验证、条件格式、筛选条件、保护、文档属性、
 基础图表及 PNG/JPEG 图片写出。Python 公式计算器不是 Excel 全函数兼容引擎；本版本
 不包含从外部 XLSX 恢复图表或图片、结构化 Table 公式或流式读写。
 

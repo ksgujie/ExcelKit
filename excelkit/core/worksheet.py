@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import os
 import re
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
@@ -511,6 +512,161 @@ class Worksheet:
                     if (source_row, column) in source_values:
                         mapping[(target_row, column)] = value
         self._workbook._invalidate_formula_caches()
+        return self
+
+    @staticmethod
+    def _matches_search(
+        candidate: Any,
+        query: Any,
+        *,
+        match_case: bool,
+        whole: bool,
+    ) -> bool:
+        """功能：按查找选项判断一个候选值是否匹配查询值。
+
+        使用方法：由 :meth:`find` 与 :meth:`replace` 内部调用。
+        参数：``candidate`` 为单元格值或公式；``query`` 为待查找值；``match_case``
+        控制字符串大小写；``whole`` 控制字符串是否必须完整相等。
+        返回：匹配时为 ``True``；非字符串查询始终采用 Python 相等比较。
+        """
+        if isinstance(query, str):
+            if not isinstance(candidate, str):
+                candidate = str(candidate)
+            if not match_case:
+                candidate, query = candidate.casefold(), query.casefold()
+            return candidate == query if whole else query in candidate
+        return candidate == query
+
+    def find(
+        self,
+        query: Any,
+        *,
+        match_case: bool = False,
+        whole: bool = False,
+        in_formulas: bool = False,
+    ) -> tuple[Cell, ...]:
+        """功能：在已使用区域的普通值或公式中查找全部匹配单元格。
+
+        使用方法：``ws.find('张三')`` 进行不区分大小写的包含查找；
+        ``ws.find('=SUM', in_formulas=True)`` 在公式文本中查找。
+        参数：``query`` 为非 ``None`` 的查找值；字符串可配合 ``match_case`` 和
+        ``whole`` 控制匹配方式；``in_formulas`` 为真时只搜索公式文本。
+        返回：按行优先顺序排列的 ``Cell`` 元组；未找到时返回空元组。
+        异常：空字符串、空值或开关类型无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if query is None:
+            raise ValueError("query 不能为 None")
+        if isinstance(query, str) and not query:
+            raise ValueError("字符串 query 不能为空")
+        for name, value in (
+            ("match_case", match_case), ("whole", whole), ("in_formulas", in_formulas)
+        ):
+            if not isinstance(value, bool):
+                raise TypeError(f"{name} 必须是 bool")
+        matches: list[Cell] = []
+        for row in range(self._max_row + 1):
+            for column in range(self._max_column + 1):
+                coordinate = (row, column)
+                candidate = (
+                    self._formulas.get(coordinate)
+                    if in_formulas else self._values.get(row, column)
+                )
+                if candidate is not None and self._matches_search(
+                    candidate, query, match_case=match_case, whole=whole
+                ):
+                    matches.append(self.cell(row, column))
+        return tuple(matches)
+
+    def replace(
+        self,
+        query: Any,
+        replacement: Any,
+        *,
+        match_case: bool = False,
+        whole: bool = False,
+        in_formulas: bool = False,
+        limit: int | None = None,
+    ) -> int:
+        """功能：替换已使用区域内普通值或公式文本的全部匹配内容。
+
+        使用方法：``count = ws.replace('旧名称', '新名称')``；使用
+        ``ws.replace('SUM', 'AVERAGE', in_formulas=True)`` 可替换公式片段。
+        参数：``query``、匹配开关的规则与 :meth:`find` 相同；``replacement`` 为
+        替换值，字符串部分匹配时必须为字符串；``in_formulas`` 为真时替换值必须为
+        字符串；``limit`` 为可选的最大替换次数，``0`` 表示不替换。
+        返回：实际发生替换的单元格数量。
+        异常：参数不合法、公式替换后无效或写入合并区域限制时抛出相应异常；开始
+        替换前会先找出全部目标，单个写入失败时之前替换不回滚。
+        """
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 0
+        ):
+            raise ValueError("limit 必须是非负整数或 None")
+        matches = self.find(
+            query, match_case=match_case, whole=whole, in_formulas=in_formulas
+        )
+        if in_formulas and not isinstance(replacement, str):
+            raise TypeError("替换公式时 replacement 必须是字符串")
+        if isinstance(query, str) and not whole and not isinstance(replacement, str):
+            raise TypeError("替换字符串片段时 replacement 必须是字符串")
+        replaced = 0
+        for cell in matches:
+            if limit is not None and replaced >= limit:
+                break
+            if in_formulas:
+                source = cell.formula
+                if source is None:
+                    continue
+                flags = 0 if match_case else re.IGNORECASE
+                target = (
+                    replacement if whole
+                    else re.sub(
+                        re.escape(query), lambda _match: replacement,
+                        source, flags=flags,
+                    )
+                )
+                cell.formula = target
+            else:
+                source = cell.value
+                if isinstance(query, str) and isinstance(source, str):
+                    flags = 0 if match_case else re.IGNORECASE
+                    target = (
+                        replacement if whole
+                        else re.sub(
+                            re.escape(query), lambda _match: replacement,
+                            source, flags=flags,
+                        )
+                    )
+                else:
+                    target = replacement
+                cell.value = target
+            replaced += 1
+        return replaced
+
+    def export(
+        self,
+        filename: str | os.PathLike[str],
+        *,
+        encoding: str = "utf-8-sig",
+        delimiter: str | None = None,
+        formulas: bool = False,
+    ) -> "Worksheet":
+        """功能：将当前单张工作表导出为 CSV 或 TSV 文件。
+
+        使用方法：``ws.export('sales.csv')``；``ws.export('raw.tsv', formulas=True)``
+        会输出公式原文而不是缓存结果。
+        参数：``filename`` 必须以 ``.csv`` 或 ``.tsv`` 结尾；``encoding`` 为文件
+        编码，默认带 BOM 的 UTF-8；``delimiter`` 可覆盖扩展名默认分隔符；
+        ``formulas`` 控制公式单元格输出内容。
+        返回：当前 ``Worksheet``，支持链式调用。
+        异常：参数、扩展名、编码或路径无效时抛出 ``TypeError``、``ValueError``、
+        ``InvalidFileError`` 或文件系统异常。
+        """
+        from ..writer.delimited import write_delimited
+
+        write_delimited(
+            self, filename, encoding=encoding, delimiter=delimiter, formulas=formulas
+        )
         return self
 
     def add_chart(self, chart_type: str, *, anchor: str) -> Chart:
