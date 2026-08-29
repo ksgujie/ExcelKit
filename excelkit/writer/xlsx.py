@@ -926,6 +926,10 @@ def sheet_xml(
                 attributes.update({"width": str(column.width), "customWidth": "1"})
             if column.hidden:
                 attributes["hidden"] = "1"
+            if column.outline_level:
+                attributes["outlineLevel"] = str(column.outline_level)
+            if column.collapsed:
+                attributes["collapsed"] = "1"
             ET.SubElement(cols, _qname(_MAIN_NS, "col"), attributes)
 
     sheet_data = ET.SubElement(root, _qname(_MAIN_NS, "sheetData"))
@@ -946,6 +950,10 @@ def sheet_xml(
                 )
             if row_dimension.hidden:
                 row_attributes["hidden"] = "1"
+            if row_dimension.outline_level:
+                row_attributes["outlineLevel"] = str(row_dimension.outline_level)
+            if row_dimension.collapsed:
+                row_attributes["collapsed"] = "1"
         row_element = ET.SubElement(
             sheet_data, _qname(_MAIN_NS, "row"), row_attributes
         )
@@ -967,8 +975,8 @@ def sheet_xml(
                 if style_id:
                     element.set("s", str(style_id))
                 row_element.append(element)
-    if sheet.auto_filter_range is not None:
-        auto_filter = ET.SubElement(root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet.auto_filter_range})
+    if sheet._filter_range is not None:
+        auto_filter = ET.SubElement(root, _qname(_MAIN_NS, "autoFilter"), {"ref": sheet._filter_range})
         for column, values in sorted(sheet._filter_conditions.items()):
             filter_column = ET.SubElement(auto_filter, _qname(_MAIN_NS, "filterColumn"), {"colId": str(column)})
             custom = ET.SubElement(filter_column, _qname(_MAIN_NS, "filters"))

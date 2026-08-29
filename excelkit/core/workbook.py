@@ -411,7 +411,7 @@ class Workbook:
                 copied_table._data_max_row = table._data_max_row
                 copied_table._bounds = table._bounds
                 copied_table._show_totals = True
-            copied_table.totals.update(table.totals)
+            copied_table._totals.update(table.totals)
         for image in source.images:
             copied_image = target.add_image(
                 image.payload, anchor=image.anchor, name=image.filename

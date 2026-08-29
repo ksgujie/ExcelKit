@@ -248,12 +248,13 @@ class Table:
 
     @property
     def totals(self) -> dict[str, str]:
-        """功能：取得或修改列汇总函数映射。使用方法：``table.totals['金额'] = 'sum'``。
+        """功能：取得列汇总函数映射的只读语义快照。
 
-        参数：字典键为列名，值为 Excel 支持的汇总函数名，如 ``sum``、``average``、
-        ``count``、``min``、``max``。返回可直接修改的字典。
+        使用方法：``totals = table.totals``；修改使用 :meth:`set_total`。
+        参数：无。
+        返回：键为列名、值为 Excel 汇总函数名的独立字典副本。
         """
-        return self._totals
+        return dict(self._totals)
 
     @property
     def records(self) -> list[dict[str, Any]]:

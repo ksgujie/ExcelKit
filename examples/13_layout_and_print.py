@@ -35,7 +35,7 @@ def create_report() -> Workbook:
     worksheet.column(4).width = 14
     worksheet.column(5).width = 20
     worksheet.freeze_panes = "A3"
-    worksheet.auto_filter_range = "A2:F5"
+    worksheet.auto_filter.range = "A2:F5"
     worksheet.show_gridlines = False
 
     page = worksheet.page

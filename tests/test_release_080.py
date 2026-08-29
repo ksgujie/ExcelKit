@@ -1,4 +1,4 @@
-"""0.8.0 业务报表生产力 API 回归测试。"""
+"""0.8.1 业务报表生产力 API 回归测试。"""
 
 from __future__ import annotations
 
@@ -69,7 +69,8 @@ class Release080Tests(unittest.TestCase):
         ])
         self.assertEqual(worksheet.range("A1:C5").remove_duplicates([0], has_header=True), 1)
         self.assertEqual(worksheet.range("A1:C5").remove_blank_rows(), 2)
-        worksheet.fill_formula("D2:D3", "=B2*C2")
+        worksheet["D2"].formula = "=B2*C2"
+        worksheet.range("D2:D2").auto_fill("D2:D3")
 
         self.assertEqual(worksheet.range("A1:C3").values, [["编号", "数量", "单价"], ["A", 2, 3], ["B", 4, 5]])
         self.assertEqual(worksheet["D2"].formula, "=B2*C2")
@@ -103,6 +104,42 @@ class Release080Tests(unittest.TestCase):
         self.assertIn("dataBar", xml)
         self.assertIn("iconSet", xml)
         self.assertIn("rowBreaks", xml)
+
+    def test_outline_groups_and_removed_duplicate_apis(self) -> None:
+        """功能：验证行列大纲可往返，并确保重复 API 已彻底删除。"""
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet["A1"] = "分组"
+        worksheet.group_rows(1, 3, collapsed=True)
+        worksheet.group_rows(1, 3)
+        worksheet.ungroup_rows(1, 3)
+        self.assertTrue(worksheet.row(3).collapsed)
+        self.assertTrue(worksheet.row(2).hidden)
+        worksheet.group_columns(1, 2)
+
+        self.assertEqual(worksheet.row(2).outline_level, 1)
+        self.assertTrue(worksheet.row(2).hidden)
+        self.assertTrue(worksheet.row(3).collapsed)
+        self.assertEqual(worksheet.column(1).outline_level, 1)
+        self.assertFalse(hasattr(worksheet, "auto_filter_range"))
+        self.assertFalse(hasattr(worksheet, "fill_formula"))
+        self.assertFalse(hasattr(worksheet.range("A1:A1"), "clear_values"))
+        self.assertFalse(hasattr(worksheet.auto_filter, "add"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            xlsx = Path(directory) / "groups.xlsx"
+            xls = Path(directory) / "groups.xls"
+            workbook.save(xlsx)
+            workbook.save(xls)
+            restored = Workbook.load(xlsx).active
+        self.assertEqual(restored.row(2).outline_level, 1)
+        self.assertTrue(restored.row(3).collapsed)
+        self.assertEqual(restored.column(2).outline_level, 1)
+
+        worksheet.ungroup_rows(1, 3)
+        worksheet.ungroup_columns(1, 2)
+        self.assertEqual(worksheet.row(2).outline_level, 0)
+        self.assertEqual(worksheet.column(1).outline_level, 0)
 
 
 if __name__ == "__main__":

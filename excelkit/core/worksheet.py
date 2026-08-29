@@ -272,6 +272,117 @@ class Worksheet:
             self._columns[index] = ColumnDimension(index)
         return self._columns[index]
 
+    @staticmethod
+    def _group_bounds(first: int, last: int, *, rows: bool) -> tuple[int, int]:
+        """功能：验证行列分组的包含式 0-based 边界。
+
+        使用方法：由四个公开分组方法内部调用。
+        参数：``first``、``last`` 为包含式边界；``rows`` 指示验证行还是列。
+        返回：验证后的 ``(first, last)`` 元组。
+        异常：索引类型、范围或顺序无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        validator = validate_row_index if rows else validate_column_index
+        validator(first)
+        validator(last)
+        if first > last:
+            raise ValueError("first 不能大于 last")
+        return first, last
+
+    def _group_axis(
+        self, first: int, last: int, *, rows: bool, collapsed: bool
+    ) -> "Worksheet":
+        """功能：为连续行或列增加一层 Excel 大纲分组。
+
+        使用方法：由 ``group_rows()`` 和 ``group_columns()`` 复用。
+        参数：``first``、``last`` 为包含式边界；``rows`` 选择轴；``collapsed``
+        控制是否隐藏成员并记录折叠标志。
+        返回：当前工作表。
+        异常：参数或嵌套层级无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(collapsed, bool):
+            raise TypeError("collapsed 必须是 bool")
+        first, last = self._group_bounds(first, last, rows=rows)
+        getter = self.row if rows else self.column
+        dimensions = [getter(index) for index in range(first, last + 1)]
+        if any(dimension.outline_level >= 7 for dimension in dimensions):
+            raise ValueError("Excel 行列分组最多支持 7 层嵌套")
+        for dimension in dimensions:
+            dimension.outline_level += 1
+            if collapsed:
+                dimension.hidden = True
+        if collapsed:
+            dimensions[-1].collapsed = True
+        return self
+
+    def _ungroup_axis(self, first: int, last: int, *, rows: bool) -> "Worksheet":
+        """功能：从连续行或列移除一层 Excel 大纲分组。
+
+        使用方法：由 ``ungroup_rows()`` 和 ``ungroup_columns()`` 复用。
+        参数：``first``、``last`` 为包含式边界；``rows`` 选择轴。
+        返回：当前工作表。
+        异常：边界无效或范围内存在未分组维度时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        first, last = self._group_bounds(first, last, rows=rows)
+        getter = self.row if rows else self.column
+        dimensions = [getter(index) for index in range(first, last + 1)]
+        if any(dimension.outline_level == 0 for dimension in dimensions):
+            raise ValueError("目标范围中存在未分组的行或列")
+        was_collapsed = dimensions[-1].collapsed
+        for dimension in dimensions:
+            dimension.outline_level -= 1
+            if was_collapsed and dimension.outline_level == 0:
+                dimension.hidden = False
+        dimensions[-1].collapsed = was_collapsed and any(
+            dimension.outline_level > 0 for dimension in dimensions
+        )
+        return self
+
+    def group_rows(
+        self, first_row: int, last_row: int, *, collapsed: bool = False
+    ) -> "Worksheet":
+        """功能：将连续行组成可在 Excel 中折叠的大纲组。
+
+        使用方法：``ws.group_rows(1, 10)``；``collapsed=True`` 会以折叠状态打开。
+        参数：``first_row``、``last_row`` 为包含式 0-based 行索引；``collapsed``
+        控制保存文件打开时是否隐藏分组明细。
+        返回：当前工作表。
+        异常：索引、顺序、层级或开关无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._group_axis(first_row, last_row, rows=True, collapsed=collapsed)
+
+    def ungroup_rows(self, first_row: int, last_row: int) -> "Worksheet":
+        """功能：移除连续行的一层大纲分组。
+
+        使用方法：``ws.ungroup_rows(1, 10)``。
+        参数：``first_row``、``last_row`` 为包含式 0-based 行索引。
+        返回：当前工作表。
+        异常：范围中存在未分组行或边界无效时抛出 ``ValueError``。
+        """
+        return self._ungroup_axis(first_row, last_row, rows=True)
+
+    def group_columns(
+        self, first_column: int, last_column: int, *, collapsed: bool = False
+    ) -> "Worksheet":
+        """功能：将连续列组成可在 Excel 中折叠的大纲组。
+
+        使用方法：``ws.group_columns(1, 4, collapsed=True)``。
+        参数：``first_column``、``last_column`` 为包含式 0-based 列索引；
+        ``collapsed`` 控制是否以折叠状态保存。
+        返回：当前工作表。
+        异常：索引、顺序、层级或开关无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        return self._group_axis(first_column, last_column, rows=False, collapsed=collapsed)
+
+    def ungroup_columns(self, first_column: int, last_column: int) -> "Worksheet":
+        """功能：移除连续列的一层大纲分组。
+
+        使用方法：``ws.ungroup_columns(1, 4)``。
+        参数：``first_column``、``last_column`` 为包含式 0-based 列索引。
+        返回：当前工作表。
+        异常：范围中存在未分组列或边界无效时抛出 ``ValueError``。
+        """
+        return self._ungroup_axis(first_column, last_column, rows=False)
+
     @property
     def merged_ranges(self) -> tuple[Range, ...]:
         """功能：取得全部合并区域的只读顺序快照。
@@ -309,33 +420,14 @@ class Worksheet:
         self._freeze = None if (row, column) == (0, 0) else cell_address(row, column)
 
     @property
-    def auto_filter_range(self) -> Optional[str]:
-        """功能：读取工作表自动筛选区域。
-
-        使用方法：``address = worksheet.auto_filter_range``。
-        参数：无。
-        返回：大写A1矩形区域或未启用筛选时的 ``None``。
-        """
-        return self._filter_range
-
-    @auto_filter_range.setter
-    def auto_filter_range(self, address: Optional[str]) -> None:
-        """功能：设置或清除一块连续区域的自动筛选按钮。
-
-        使用方法：``worksheet.auto_filter_range = "A1:F100"``；赋值 ``None`` 清除。
-        参数：``address`` 为合法A1矩形区域字符串或 ``None``。
-        返回：``None``。
-        异常：地址无效时抛出 ``InvalidAddressError``。
-        """
-        if address is None:
-            self._filter_range = None
-            return
-        self._filter_range = Range(self, *range_index(address)).address
-
-    @property
     def auto_filter(self) -> AutoFilter:
-        """功能：取得自动筛选代理对象。使用方法：``ws.auto_filter.range = 'A1:D20'``；
-        ``ws.auto_filter.add(1, ['通过'])``。返回同一个语义代理。"""
+        """功能：取得自动筛选代理对象。
+
+        使用方法：``ws.auto_filter.range = 'A1:D20'``；
+        ``ws.auto_filter.set(1, ['通过']).apply()``。
+        参数：无。
+        返回：绑定当前工作表的 :class:`AutoFilter` 代理。
+        """
         return AutoFilter(self)
 
     @property
@@ -1832,30 +1924,6 @@ class Worksheet:
         self._formulas[(row, column)] = f"={expression}"
         self._formula_values.pop((row, column), None)
         self._formula_errors.pop((row, column), None)
-
-    def fill_formula(self, address: str, formula: str) -> Range:
-        """功能：把一个公式模板填入区域，并按位置自动调整相对 A1 引用。
-
-        使用方法：``ws.fill_formula('E2:E100', '=C2*D2')``；首个单元格保存原公式，
-        后续单元格会像 Excel 向下或向右填充一样调整相对引用。
-        参数：``address`` 为目标 A1 区域；``formula`` 为对应区域左上角的公式文本，
-        可带或不带 ``=``。
-        返回：目标 :class:`Range`。
-        异常：区域、公式或合并区域不合法时抛出 ``TypeError`` 或 ``ValueError``。
-        """
-        area = self.range(address)
-        if not isinstance(formula, str):
-            raise TypeError("formula 必须是字符串")
-        from ..template import _translate_formula
-
-        for row in range(area.min_row, area.max_row + 1):
-            for column in range(area.min_column, area.max_column + 1):
-                translated = _translate_formula(
-                    formula, row - area.min_row, column - area.min_column
-                )
-                self._set_formula(row, column, translated, invalidate=False)
-        self._workbook._invalidate_formula_caches()
-        return area
 
     def _get_cached_value(self, row: int, column: int) -> Any:
         """功能：读取公式最近一次由外部表格软件保存的缓存结果。

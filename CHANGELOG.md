@@ -1,5 +1,16 @@
 # 更新日志
 
+## 0.8.1 - 2026-08-30
+
+- 新增 `Worksheet.group_rows()`、`ungroup_rows()`、`group_columns()` 和
+  `ungroup_columns()`，支持 0-based 包含式范围、嵌套大纲层级和初始折叠状态，并可在
+  XLSX/XLS 中写出、从 XLSX 读取。
+- 完成公开 API 合并审查：公式下拉统一使用 `Range.auto_fill()`；筛选统一使用
+  `worksheet.auto_filter.range/set/apply/clear`；区域清理统一使用带开关的
+  `Range.clear()`，删除重复入口。
+- `AutoFilter.filters` 与 `Table.totals` 返回字典副本，防止绕过公开方法的参数验证；
+  更新完整中文手册、示例和自动化回归测试。
+
 ## 0.8.0 - 2026-08-29
 
 - 新增业务记录 API：`Worksheet.write_records()`、`write_table()`、`read_records()`、

@@ -117,7 +117,7 @@ class LoadAndFormatTests(unittest.TestCase):
         sheet.column(1).width = 20
         sheet.column(3).hidden = True
         sheet.freeze_panes = "B2"
-        sheet.auto_filter_range = "A2:F100"
+        sheet.auto_filter.range = "A2:F100"
         sheet.show_gridlines = False
         page = sheet.page
         page.orientation = "landscape"
@@ -150,7 +150,7 @@ class LoadAndFormatTests(unittest.TestCase):
         self.assertEqual(result.column(1).width, 20)
         self.assertTrue(result.column(3).hidden)
         self.assertEqual(result.freeze_panes, "B2")
-        self.assertEqual(result.auto_filter_range, "A2:F100")
+        self.assertEqual(result.auto_filter.range, "A2:F100")
         self.assertFalse(result.show_gridlines)
         self.assertEqual(result.page.orientation, "landscape")
         self.assertEqual(result.page.paper_size, "A3")

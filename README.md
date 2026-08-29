@@ -1,14 +1,14 @@
-# ExcelKit 0.8.0
+# ExcelKit 0.8.1
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.8.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.8.1 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.8.0-py3-none-any.whl
+pip install excelkit-0.8.1-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -84,7 +84,7 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `row(index)`、`column(index)`：设置 0-based 行高、列宽和隐藏状态。
 - `merged_ranges`：返回全部合并区域的只读 tuple。
 - `freeze_panes`：设置冻结后的第一个可滚动 A1 单元格，`None` 清除。
-- `auto_filter_range`：设置或清除连续自动筛选区域；`auto_filter` 可增加条件并 `apply()` 隐藏不匹配行。
+- `auto_filter.range`：设置或清除连续筛选区域；`auto_filter.set()` 设置条件并可用 `apply()` 隐藏不匹配行。
 - `sort(address, *, keys, has_header=False)`：按 `SortKey` 对连续区域排序。
 - `visibility`：使用 `Worksheet.VISIBLE`、`HIDDEN`、`VERY_HIDDEN` 控制可见状态。
 - `add_chart(chart_type, anchor=...)`、`charts`：创建柱状、条形、折线或饼图。
@@ -140,7 +140,7 @@ assert worksheet.color == "FF4472C4"
 - `values`：以二维 list 读取普通值；公式单元格显示为 `None`。
 - `set_values(values)`：写入等形状二维数据并返回当前区域；普通值会覆盖原公式。
 - `address`：规范化 A1 区域地址。
-- `clear_values()`、`clear_styles()`、`clear()`：分别清除内容、样式或两者。
+- `clear(values=..., styles=..., hyperlinks=..., notes=...)`：通过一个入口按需清除区域内容和附属信息。
 - `copy_to(target, *, values=True, formulas=True, styles=True)`：复制到等尺寸区域，
   并按源目标偏移调整公式中的相对行列引用。
 - `merge()`、`unmerge()`：合并或取消合并当前连续区域。
@@ -394,7 +394,7 @@ worksheet.range("A1:F1").merge()
 worksheet.row(0).height = 28
 worksheet.column(1).width = 24
 worksheet.freeze_panes = "A3"
-worksheet.auto_filter_range = "A2:F100"
+worksheet.auto_filter.range = "A2:F100"
 worksheet.show_gridlines = False
 
 page = worksheet.page
@@ -442,7 +442,7 @@ XlsxWriter(workbook).write("demo.xlsx")
 图片、批注、排序、筛选和可见性；[18_business_report.py](examples/18_business_report.py)
 演示字典记录、业务 Table、批量公式、自动填充、条件格式、汇总和打印分页。
 
-## 0.8.0 业务报表快捷接口
+## 0.8.1 业务报表快捷接口
 
 ```python
 from excelkit import Workbook
@@ -454,18 +454,23 @@ wb = Workbook()
 ws = wb.active
 orders = [{"订单号": "SO-001", "数量": 2, "单价": 99.5, "金额": None}]
 table = ws.write_table(0, 0, orders, name="Orders", freeze_header=True, auto_fit=True)
-ws.fill_formula("E2:E100", "=C2*D2")
+ws["E2"].formula = "=C2*D2"
+ws.range("E2:E2").auto_fill("E2:E100")
 ws.range("E2:E100").format.number = NumberFormat.CURRENCY
 ws.range("A1:E1").apply_style(ReportStyle.HEADER)
 ws.range("G1:G2").auto_fill("G1:G100", mode=AutoFillMode.SERIES)
 table.set_total("金额", TotalFunction.SUM)
+
+# 0-based、包含首尾索引；collapsed=True 时打开文件即为折叠状态。
+ws.group_rows(1, 9, collapsed=True)
+ws.group_columns(1, 3)
 ```
 
 `write_records()` / `read_records()` 用于字典列表与 Excel 区域之间的双向转换；
 `export_pages()` 可将大批量记录拆为多张工作表；`render_many()` 可按同一模板一次生成多份
 工作表。完整参数和示例见中文 API 手册。
 
-## 0.8.0 能力边界
+## 0.8.1 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域

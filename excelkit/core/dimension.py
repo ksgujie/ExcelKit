@@ -26,10 +26,25 @@ def _size(value: Optional[float], name: str, maximum: float) -> Optional[float]:
     return converted
 
 
-class RowDimension:
-    """表示一行的0-based索引、可选行高和隐藏状态。"""
+def _outline_level(value: int) -> int:
+    """功能：验证 Excel 行列分组的大纲层级。
 
-    __slots__ = ("_index", "_height", "_hidden")
+    使用方法：由行列尺寸对象的 ``outline_level`` 属性设置器调用。
+    参数：``value`` 为 0～7 的整数；0 表示未分组。
+    返回：验证后的整数层级。
+    异常：类型或范围无效时抛出 ``TypeError`` 或 ``ValueError``。
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("outline_level 必须是整数")
+    if not 0 <= value <= 7:
+        raise ValueError("outline_level 必须在 0～7 之间")
+    return value
+
+
+class RowDimension:
+    """表示一行的0-based索引、尺寸、隐藏状态和大纲分组状态。"""
+
+    __slots__ = ("_index", "_height", "_hidden", "_outline_level", "_collapsed")
 
     def __init__(
         self, index: int, height: Optional[float] = None, hidden: bool = False
@@ -44,6 +59,8 @@ class RowDimension:
         self._index = validate_row_index(index)
         self._height: Optional[float] = None
         self._hidden = False
+        self._outline_level = 0
+        self._collapsed = False
         self.height = height
         self.hidden = hidden
 
@@ -101,6 +118,50 @@ class RowDimension:
             raise TypeError("RowDimension.hidden 必须是布尔值")
         self._hidden = value
 
+    @property
+    def outline_level(self) -> int:
+        """功能：读取当前行的 Excel 大纲层级。
+
+        使用方法：``level = worksheet.row(3).outline_level``。
+        参数：无。
+        返回：0～7 的整数；0 表示当前行没有分组。
+        """
+        return self._outline_level
+
+    @outline_level.setter
+    def outline_level(self, value: int) -> None:
+        """功能：设置当前行的 Excel 大纲层级。
+
+        使用方法：通常由 ``worksheet.group_rows()`` 调用，也可直接设置。
+        参数：``value`` 为 0～7 的整数。
+        返回：``None``。
+        异常：类型或范围无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        self._outline_level = _outline_level(value)
+
+    @property
+    def collapsed(self) -> bool:
+        """功能：读取当前行是否带有 Excel 大纲折叠标志。
+
+        使用方法：``collapsed = worksheet.row(3).collapsed``。
+        参数：无。
+        返回：布尔值。
+        """
+        return self._collapsed
+
+    @collapsed.setter
+    def collapsed(self, value: bool) -> None:
+        """功能：设置当前行的大纲折叠标志。
+
+        使用方法：通常由 ``worksheet.group_rows(..., collapsed=True)`` 调用。
+        参数：``value`` 必须是布尔值。
+        返回：``None``。
+        异常：类型无效时抛出 ``TypeError``。
+        """
+        if not isinstance(value, bool):
+            raise TypeError("RowDimension.collapsed 必须是布尔值")
+        self._collapsed = value
+
     def _is_default(self) -> bool:
         """功能：判断当前行是否没有任何自定义尺寸设置。
 
@@ -108,13 +169,16 @@ class RowDimension:
         参数：无。
         返回：行高为默认且未隐藏时返回 ``True``。
         """
-        return self._height is None and not self._hidden
+        return (
+            self._height is None and not self._hidden
+            and self._outline_level == 0 and not self._collapsed
+        )
 
 
 class ColumnDimension:
-    """表示一列的0-based索引、可选列宽和隐藏状态。"""
+    """表示一列的0-based索引、尺寸、隐藏状态和大纲分组状态。"""
 
-    __slots__ = ("_index", "_width", "_hidden")
+    __slots__ = ("_index", "_width", "_hidden", "_outline_level", "_collapsed")
 
     def __init__(
         self, index: int, width: Optional[float] = None, hidden: bool = False
@@ -129,6 +193,8 @@ class ColumnDimension:
         self._index = validate_column_index(index)
         self._width: Optional[float] = None
         self._hidden = False
+        self._outline_level = 0
+        self._collapsed = False
         self.width = width
         self.hidden = hidden
 
@@ -186,6 +252,50 @@ class ColumnDimension:
             raise TypeError("ColumnDimension.hidden 必须是布尔值")
         self._hidden = value
 
+    @property
+    def outline_level(self) -> int:
+        """功能：读取当前列的 Excel 大纲层级。
+
+        使用方法：``level = worksheet.column(2).outline_level``。
+        参数：无。
+        返回：0～7 的整数；0 表示当前列没有分组。
+        """
+        return self._outline_level
+
+    @outline_level.setter
+    def outline_level(self, value: int) -> None:
+        """功能：设置当前列的 Excel 大纲层级。
+
+        使用方法：通常由 ``worksheet.group_columns()`` 调用，也可直接设置。
+        参数：``value`` 为 0～7 的整数。
+        返回：``None``。
+        异常：类型或范围无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        self._outline_level = _outline_level(value)
+
+    @property
+    def collapsed(self) -> bool:
+        """功能：读取当前列是否带有 Excel 大纲折叠标志。
+
+        使用方法：``collapsed = worksheet.column(2).collapsed``。
+        参数：无。
+        返回：布尔值。
+        """
+        return self._collapsed
+
+    @collapsed.setter
+    def collapsed(self, value: bool) -> None:
+        """功能：设置当前列的大纲折叠标志。
+
+        使用方法：通常由 ``worksheet.group_columns(..., collapsed=True)`` 调用。
+        参数：``value`` 必须是布尔值。
+        返回：``None``。
+        异常：类型无效时抛出 ``TypeError``。
+        """
+        if not isinstance(value, bool):
+            raise TypeError("ColumnDimension.collapsed 必须是布尔值")
+        self._collapsed = value
+
     def _is_default(self) -> bool:
         """功能：判断当前列是否没有任何自定义尺寸设置。
 
@@ -193,7 +303,10 @@ class ColumnDimension:
         参数：无。
         返回：列宽为默认且未隐藏时返回 ``True``。
         """
-        return self._width is None and not self._hidden
+        return (
+            self._width is None and not self._hidden
+            and self._outline_level == 0 and not self._collapsed
+        )
 
 
 __all__ = ["RowDimension", "ColumnDimension"]

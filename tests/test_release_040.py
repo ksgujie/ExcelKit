@@ -122,11 +122,11 @@ class CopyAndRangeTests(unittest.TestCase):
         style = Style(font=Font(italic=True))
         sheet["A1"].value = 1
         sheet["A1"].style = style
-        sheet.range("A1:A1").clear_styles()
+        sheet.range("A1:A1").clear(values=False, styles=True)
         self.assertEqual(sheet["A1"].value, 1)
         self.assertEqual(sheet["A1"].style, Style())
         sheet["A1"].style = style
-        sheet.range("A1:A1").clear_values()
+        sheet.range("A1:A1").clear(values=True, styles=False)
         self.assertIsNone(sheet["A1"].value)
         self.assertEqual(sheet["A1"].style, style)
         sheet["A1"].value = 2

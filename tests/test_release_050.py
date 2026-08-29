@@ -52,7 +52,7 @@ class Release050RoundTripTests(unittest.TestCase):
             "B2:B20", operator="greaterThan", formula="90", fill="FFC7CE", font="006100"
         )
         worksheet.auto_filter.range = "A1:C20"
-        worksheet.auto_filter.add(2, ["通过"])
+        worksheet.auto_filter.set(2, ["通过"])
         worksheet.protection.enabled = True
         worksheet.protection.password = "ABCD"
         workbook.protection.enabled = True
@@ -62,7 +62,7 @@ class Release050RoundTripTests(unittest.TestCase):
         table = worksheet.add_table("A1:C2", name="Scores")
         table.append(["李四", 88, "不通过"])
         table.show_totals = True
-        table.totals["成绩"] = "average"
+        table.set_total("成绩", "average")
 
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "release-050.xlsx"

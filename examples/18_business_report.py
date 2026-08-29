@@ -22,8 +22,9 @@ table = worksheet.write_table(
     0, 0, orders, name="Orders", freeze_header=True, auto_fit=True
 )
 
-# 使用相对引用公式批量计算金额；区域格式和条件格式均作用于业务数据行。
-worksheet.fill_formula("E2:E4", "=C2*D2")
+# 先写入首格公式，再使用唯一的自动填充接口向下扩展相对引用。
+worksheet["E2"].formula = "=C2*D2"
+worksheet.range("E2:E2").auto_fill("E2:E4")
 worksheet.range("E2:E4").format.number = NumberFormat.CURRENCY
 worksheet.range("A1:E1").apply_style(ReportStyle.HEADER)
 worksheet.add_data_bar("E2:E4", color="5B9BD5")

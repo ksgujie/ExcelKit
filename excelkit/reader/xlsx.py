@@ -330,10 +330,14 @@ def _load_sheet_layout(
                     if "width" in source.attrib else None
                 )
                 hidden = _bool_attribute(source.get("hidden"))
+                outline_level = int(source.get("outlineLevel", "0"))
+                collapsed = _bool_attribute(source.get("collapsed"))
                 for column_index in range(minimum, maximum + 1):
                     dimension = worksheet.column(column_index)
                     dimension.width = width
                     dimension.hidden = hidden
+                    dimension.outline_level = outline_level
+                    dimension.collapsed = collapsed
 
         sheet_data = root.find(_tag(_MAIN_NS, "sheetData"))
         if sheet_data is not None:
@@ -341,13 +345,19 @@ def _load_sheet_layout(
                 row_index = int(source.get("r", "0")) - 1
                 if row_index < 0:
                     raise ValueError("无效的行尺寸索引")
-                if "ht" in source.attrib or _bool_attribute(source.get("hidden")):
+                if (
+                    "ht" in source.attrib or _bool_attribute(source.get("hidden"))
+                    or source.get("outlineLevel") is not None
+                    or _bool_attribute(source.get("collapsed"))
+                ):
                     dimension = worksheet.row(row_index)
                     dimension.height = (
                         float(source.get("ht", "0"))
                         if "ht" in source.attrib else None
                     )
                     dimension.hidden = _bool_attribute(source.get("hidden"))
+                    dimension.outline_level = int(source.get("outlineLevel", "0"))
+                    dimension.collapsed = _bool_attribute(source.get("collapsed"))
 
         merge_cells = root.find(_tag(_MAIN_NS, "mergeCells"))
         if merge_cells is not None:
@@ -360,7 +370,7 @@ def _load_sheet_layout(
         auto_filter = root.find(_tag(_MAIN_NS, "autoFilter"))
         if auto_filter is not None and auto_filter.get("ref"):
             reference = auto_filter.get("ref") or ""
-            worksheet.auto_filter_range = (
+            worksheet.auto_filter.range = (
                 reference if ":" in reference else f"{reference}:{reference}"
             )
             for filter_column in auto_filter.findall(_tag(_MAIN_NS, "filterColumn")):
@@ -815,7 +825,7 @@ def _load_sheet_tables(
                     function = column.get("totalsRowFunction")
                     index = int(column.get("id", "0")) - 1
                     if function and 0 <= index < len(names):
-                        table.totals[names[index]] = function
+                        table._totals[names[index]] = function
     except (TypeError, ValueError, KeyError) as error:
         if isinstance(error, InvalidFileError):
             raise

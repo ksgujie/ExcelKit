@@ -197,6 +197,8 @@ class XlsWriter:
                     target_row.height = int(round(dimension.height * 20))
                     target_row.height_mismatch = True
                 target_row.hidden = int(dimension.hidden)
+                target_row.level = dimension.outline_level
+                target_row.collapse = int(dimension.collapsed)
             for column_index, dimension in worksheet._columns.items():
                 if dimension._is_default():
                     continue
@@ -204,6 +206,8 @@ class XlsWriter:
                 if dimension.width is not None:
                     target_column.width = int(round(dimension.width * 256))
                 target_column.hidden = int(dimension.hidden)
+                target_column.level = dimension.outline_level
+                target_column.collapse = int(dimension.collapsed)
             if worksheet.freeze_panes is not None:
                 from ..address import cell_index
 

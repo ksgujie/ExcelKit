@@ -62,7 +62,7 @@ class FormulaAndDataOperationTests(unittest.TestCase):
         worksheet.sort("A2:C4", keys=[SortKey(1, descending=True)])
         self.assertEqual(worksheet["A2"].value, "李四")
         worksheet.auto_filter.range = "A1:C4"
-        worksheet.auto_filter.add(2, ["通过"]).apply()
+        worksheet.auto_filter.set(2, ["通过"]).apply()
         self.assertFalse(worksheet.row(1).hidden)
         self.assertTrue(worksheet.row(3).hidden)
         worksheet.visibility = Worksheet.HIDDEN

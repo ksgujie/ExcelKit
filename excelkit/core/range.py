@@ -199,35 +199,6 @@ class Range:
                 )
         return self
 
-    def clear_values(self) -> "Range":
-        """功能：清除区域内普通值、公式、缓存结果和计算错误并保留样式。
-
-        使用方法：``worksheet.range("A1:C10").clear_values()``。
-        参数：无。
-        返回：当前 :class:`Range`，支持链式调用。
-        """
-        self._worksheet._workbook._invalidate_formula_caches()
-        for row in range(self._min_row, self._max_row + 1):
-            for column in range(self._min_column, self._max_column + 1):
-                coordinate = (row, column)
-                self._worksheet._values.set(row, column, None)
-                self._worksheet._formulas.pop(coordinate, None)
-                self._worksheet._formula_values.pop(coordinate, None)
-                self._worksheet._formula_errors.pop(coordinate, None)
-        return self
-
-    def clear_styles(self) -> "Range":
-        """功能：把区域内全部单元格恢复为默认样式并保留值和公式。
-
-        使用方法：``worksheet.range("A1:C10").clear_styles()``。
-        参数：无。
-        返回：当前 :class:`Range`，支持链式调用。
-        """
-        for row in range(self._min_row, self._max_row + 1):
-            for column in range(self._min_column, self._max_column + 1):
-                self._worksheet._styles.pop((row, column), None)
-        return self
-
     def clear(
         self,
         *,
@@ -238,8 +209,9 @@ class Range:
     ) -> "Range":
         """功能：按开关清除区域内内容、样式、超链接和批注。
 
-        使用方法：``worksheet.range("A1:C10").clear()`` 保持原有行为，清除值、
-        公式和样式；``clear(hyperlinks=True, notes=True)`` 还会清除链接和批注。
+        使用方法：``worksheet.range("A1:C10").clear()`` 清除值、公式和样式；
+        ``clear(values=True, styles=False)`` 只清内容；``clear(values=False,
+        styles=True)`` 只清样式；附属信息使用对应开关。
         参数：``values`` 控制普通值、公式与公式缓存；``styles`` 控制单元格样式；
         ``hyperlinks``、``notes`` 默认关闭，以保持旧版本行为。所有参数必须为布尔值。
         返回：当前 :class:`Range`，支持链式调用。
@@ -252,17 +224,21 @@ class Range:
             if not isinstance(enabled, bool):
                 raise TypeError(f"{name} 必须是 bool")
         if values:
-            self.clear_values()
-        if styles:
-            self.clear_styles()
-        if hyperlinks or notes:
-            for row in range(self._min_row, self._max_row + 1):
-                for column in range(self._min_column, self._max_column + 1):
-                    coordinate = (row, column)
-                    if hyperlinks:
-                        self._worksheet._hyperlinks.pop(coordinate, None)
-                    if notes:
-                        self._worksheet._notes.pop(coordinate, None)
+            self._worksheet._workbook._invalidate_formula_caches()
+        for row in range(self._min_row, self._max_row + 1):
+            for column in range(self._min_column, self._max_column + 1):
+                coordinate = (row, column)
+                if values:
+                    self._worksheet._values.set(row, column, None)
+                    self._worksheet._formulas.pop(coordinate, None)
+                    self._worksheet._formula_values.pop(coordinate, None)
+                    self._worksheet._formula_errors.pop(coordinate, None)
+                if styles:
+                    self._worksheet._styles.pop(coordinate, None)
+                if hyperlinks:
+                    self._worksheet._hyperlinks.pop(coordinate, None)
+                if notes:
+                    self._worksheet._notes.pop(coordinate, None)
         return self
 
     def copy_to(

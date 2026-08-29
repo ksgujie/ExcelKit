@@ -42,7 +42,7 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         source.row(0).height = 28
         source.column(1).width = 20
         source.freeze_panes = "B2"
-        source.auto_filter_range = "A1:C3"
+        source.auto_filter.range = "A1:C3"
         source.show_gridlines = False
         source.page.orientation = "landscape"
         source.page.fit(width=1)
@@ -54,7 +54,7 @@ class WorkbookSheetManagementTests(unittest.TestCase):
         self.assertEqual(copied.row(0).height, 28)
         self.assertEqual(copied.column(1).width, 20)
         self.assertEqual(copied.freeze_panes, "B2")
-        self.assertEqual(copied.auto_filter_range, "A1:C3")
+        self.assertEqual(copied.auto_filter.range, "A1:C3")
         self.assertFalse(copied.show_gridlines)
         self.assertEqual(copied.page.orientation, "landscape")
         self.assertEqual(copied.page.header.center, "报表")
@@ -135,15 +135,15 @@ class WorksheetLayoutTests(unittest.TestCase):
         self.assertIs(self.worksheet.column(1), column)
 
         self.worksheet.freeze_panes = "b2"
-        self.worksheet.auto_filter_range = "a1:c20"
+        self.worksheet.auto_filter.range = "a1:c20"
         self.worksheet.show_gridlines = False
         self.assertEqual(self.worksheet.freeze_panes, "B2")
-        self.assertEqual(self.worksheet.auto_filter_range, "A1:C20")
+        self.assertEqual(self.worksheet.auto_filter.range, "A1:C20")
         self.assertFalse(self.worksheet.show_gridlines)
         self.worksheet.freeze_panes = "A1"
-        self.worksheet.auto_filter_range = None
+        self.worksheet.auto_filter.range = None
         self.assertIsNone(self.worksheet.freeze_panes)
-        self.assertIsNone(self.worksheet.auto_filter_range)
+        self.assertIsNone(self.worksheet.auto_filter.range)
 
 
 class PageSettingsTests(unittest.TestCase):

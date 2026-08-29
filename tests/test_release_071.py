@@ -48,7 +48,7 @@ class ReleaseDocumentationTests(unittest.TestCase):
             "[8. Range 区域](#8-range-区域)",
             "[15. 可运行示例文件](#15-可运行示例文件)",
             "[17. API 选择指南](#17-api-选择指南)",
-            "[18. 0.8.0 API 速查表](#18-080-api-速查表)",
+            "[18. 0.8.1 API 速查表](#18-081-api-速查表)",
         ):
             self.assertIn(entry, manual)
 

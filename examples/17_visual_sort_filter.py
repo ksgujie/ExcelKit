@@ -47,7 +47,7 @@ def main() -> None:
 
     worksheet.sort("A2:C4", keys=[SortKey(1, descending=True)])
     worksheet.auto_filter.range = "A1:C4"
-    worksheet.auto_filter.add(2, ["通过"]).apply()
+    worksheet.auto_filter.set(2, ["通过"]).apply()
     worksheet["A2"].note = Note("当前销售额最高", author="销售部")
 
     chart = worksheet.add_chart(ChartType.COLUMN, anchor="E2")

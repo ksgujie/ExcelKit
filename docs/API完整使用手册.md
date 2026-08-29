@@ -1,6 +1,6 @@
-# ExcelKit 0.8.0 完整中文使用与 API 手册
+# ExcelKit 0.8.1 完整中文使用与 API 手册
 
-版本：0.8.0
+版本：0.8.1
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 目录
@@ -8,7 +8,7 @@
 - [1. 安装与导入](#1-安装与导入)
 - [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
 - [3. 顶层版本 API](#3-顶层版本-api)
-  - [3.1 0.5.0 至 0.8.0 新增功能速查](#31-050-至-080-新增功能速查)
+  - [3.1 0.5.0 至 0.8.1 新增功能速查](#31-050-至-081-新增功能速查)
 - [4. Workbook 工作簿](#4-workbook-工作簿)
 - [5. Worksheet 工作表](#5-worksheet-工作表)
 - [6. Cell 单元格](#6-cell-单元格)
@@ -24,17 +24,17 @@
   - [15.1 工作表高级 API](#151-050-工作表高级-api)
   - [15.2 可视化、排序与公式 API](#152-060-可视化排序与公式-api)
   - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
-  - [15.4 业务报表生产力 API](#154-080-业务报表生产力-api)
-- [16. 0.8.0 能力边界](#16-080-能力边界)
+  - [15.4 业务报表生产力 API](#154-081-业务报表生产力-api)
+- [16. 0.8.1 能力边界](#16-081-能力边界)
 - [17. API 选择指南](#17-api-选择指南)
-- [18. 0.8.0 API 速查表](#18-080-api-速查表)
+- [18. 0.8.1 API 速查表](#18-081-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.8.0-py3-none-any.whl
+pip install excelkit-0.8.1-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -89,7 +89,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.8.0 新增功能速查
+## 3.1 0.5.0 至 0.8.1 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -134,12 +134,14 @@ ws.protection.password = "demo"
 ### 数据表增强
 
 ```python
+from excelkit.table import TotalFunction
+
 table = ws.add_table("A1:B2", name="Scores")
 print(table.columns)
 table.append(["王五", 100]).append_rows([["赵六", 88]])
 table.resize("A1:B20")
 table.show_totals = True
-table.totals["成绩"] = "average"
+table.set_total("成绩", TotalFunction.AVERAGE)
 table.clear_data()
 ```
 
@@ -149,7 +151,7 @@ table.clear_data()
 ws.add_validation("B2:B100", kind="list", values=["通过", "不通过"])
 ws.add_conditional_format("B2:B100", operator="greaterThan", formula="90", fill="C6EFCE")
 ws.auto_filter.range = "A1:C100"
-ws.auto_filter.add(1, ["通过"])
+ws.auto_filter.set(1, ["通过"])
 ```
 
 这些规则均会写入标准 XLSX XML，并可由 `Workbook.load()` 读取回来；`.xls` 写出受
@@ -168,7 +170,7 @@ ws.auto_filter.add(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.8.0"
+assert excelkit.__version__ == "0.8.1"
 ```
 
 ## 4. Workbook 工作簿
@@ -428,7 +430,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.8.0 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.8.1 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -867,7 +869,7 @@ area = worksheet.range("A1:C10")
 
 ### `Worksheet.row(index)`
 
-功能：取得指定行的持久化尺寸对象，用于设置行高和隐藏状态。重复传入同一索引会
+功能：取得指定行的持久化尺寸对象，用于设置行高、隐藏状态和大纲分组状态。重复传入同一索引会
 返回同一个 `RowDimension` 对象。
 
 参数：`index: int`，0-based 行索引，范围为 0～1048575；布尔值无效。
@@ -885,7 +887,7 @@ row.hidden = False
 
 ### `Worksheet.column(index)`
 
-功能：取得指定列的持久化尺寸对象，用于设置 Excel 列宽和隐藏状态。
+功能：取得指定列的持久化尺寸对象，用于设置 Excel 列宽、隐藏状态和大纲分组状态。
 
 参数：`index: int`，0-based 列索引，范围为 0～16383；布尔值无效。
 
@@ -932,21 +934,25 @@ assert worksheet.freeze_panes == "A3"
 worksheet.freeze_panes = None
 ```
 
-### `Worksheet.auto_filter_range`
+### `Worksheet.auto_filter.range` / `set()` / `apply()` / `clear()`
 
-功能：设置连续矩形区域的自动筛选按钮，或读取、清除现有筛选区域。它只定义
-筛选范围，不在 Python 内存中隐藏不符合条件的数据行。
+功能：通过唯一的 `auto_filter` 代理集中管理筛选区域、列条件和内存隐藏状态。
 
-参数：设置值为 A1 区域字符串（例如 `"A1:F100"`）或 `None`。
+参数：`range` 为 A1 区域或 `None`；`set(column, values)` 的 `column` 是相对于
+筛选区域的 0-based 列偏移，`values` 为允许值集合。
 
-返回：读取时返回规范化区域地址或 `None`；设置时返回 `None`。
+返回：`range` 读取规范化地址；`set()`、`apply()`、`clear()` 返回筛选代理。
 
-异常：单格地址、反向区域或越界地址抛出 `InvalidAddressError`。
+异常：区域、列索引或值集合无效时抛出 `InvalidAddressError`、`TypeError` 或
+`ValueError`。
 
 ```python
-worksheet.auto_filter_range = "A2:F100"
-worksheet.auto_filter_range = None
+worksheet.auto_filter.range = "A2:F100"
+worksheet.auto_filter.set(2, ["通过", "待审核"]).apply()
+worksheet.auto_filter.clear()
 ```
+
+不再提供重复的 `Worksheet.auto_filter_range` 和 `AutoFilter.add()`。
 
 ### `Worksheet.show_gridlines`
 
@@ -1036,7 +1042,7 @@ Workbook 内必须唯一。
 | `show_column_stripes` | `bool` | 可读写，是否显示隔列条纹 |
 | `columns` | `tuple[str, ...]` | 只读，按表头生成的唯一列名称 |
 | `show_totals` | `bool` | 可读写，是否让 Excel 显示表格汇总行 |
-| `totals` | `dict[str, str]` | 可读写映射，键为列名，值为 `sum`、`average`、`count`、`min`、`max` 等 Excel 汇总函数 |
+| `totals` | `dict[str, str]` | 只读字典副本，键为列名，值为 Excel 汇总函数；通过 `set_total()` 修改 |
 
 ```python
 assert worksheet.table("salestable") is table
@@ -1057,10 +1063,12 @@ worksheet.remove_table("SalesTable")
 错误时抛出 `TypeError`。
 
 ```python
+from excelkit.table import TotalFunction
+
 table.append(["王五", 95]).append_rows([["赵六", 88]])
 table.resize("A1:B100")
 table.show_totals = True
-table.totals["成绩"] = "average"
+table.set_total("成绩", TotalFunction.AVERAGE)
 table.clear_data()
 ```
 
@@ -1157,10 +1165,11 @@ assert worksheet.values == [
 ]
 ```
 
-### `RowDimension.index` / `height` / `hidden`
+### `RowDimension.index` / `height` / `hidden` / `outline_level` / `collapsed`
 
 功能：`index` 返回所属行的只读 0-based 索引；`height` 读取或设置行高（单位为
-磅），`None` 恢复应用程序默认行高；`hidden` 控制是否隐藏整行。
+磅），`None` 恢复应用程序默认行高；`hidden` 控制是否隐藏整行；`outline_level`
+是 0～7 的 Excel 大纲层级；`collapsed` 表示该维度是否显示折叠标志。
 
 参数：`height` 接受大于 0 且不超过 409 的有限 `int | float` 或 `None`；
 `hidden` 必须是 `bool`。
@@ -1179,10 +1188,11 @@ row.hidden = True
 row.height = None
 ```
 
-### `ColumnDimension.index` / `width` / `hidden`
+### `ColumnDimension.index` / `width` / `hidden` / `outline_level` / `collapsed`
 
 功能：`index` 返回只读 0-based 列索引；`width` 使用 Excel 字符宽度单位设置列宽，
-`None` 恢复默认列宽；`hidden` 控制是否隐藏整列。
+`None` 恢复默认列宽；`hidden` 控制是否隐藏整列；`outline_level` 和 `collapsed`
+分别表示大纲层级与折叠标志。业务代码通常使用工作表的分组方法统一管理这些属性。
 
 参数：`width` 接受大于 0 且不超过 255 的有限 `int | float` 或 `None`；
 `hidden` 必须是 `bool`。
@@ -1661,38 +1671,23 @@ result = area.set_values([
 assert result is area
 ```
 
-### `Range.clear_values()`
+### `Range.clear(*, values=True, styles=True, hyperlinks=False, notes=False)`
 
-功能：清除区域内普通值、公式、公式缓存和计算错误，保留单元格样式、合并关系与
-行列尺寸。清除内容会使工作簿中其他公式的缓存统一失效。
+功能：通过一个入口按开关清除区域内容、样式、超链接和批注。合并关系、行列尺寸
+以及历史 `max_row`、`max_column` 不缩小。
 
-参数：无。
-
-返回：当前 `Range`。
-
-### `Range.clear_styles()`
-
-功能：删除区域内自定义单元格样式，使其恢复为 `Style()`；普通值、公式和缓存保持
-不变。
-
-参数：无。
-
-返回：当前 `Range`。
-
-### `Range.clear()`
-
-功能：依次清除区域内内容和样式。合并关系、行列尺寸以及历史 `max_row`、
-`max_column` 不缩小。
-
-参数：无。
+参数：四个参数均为 `bool`；`values` 包含普通值、公式、缓存和计算错误；
+`styles` 表示自定义样式；超链接和批注默认保留。
 
 返回：当前 `Range`。
 
 ```python
-worksheet.range("A2:F100").clear_values()   # 保留原格式
-worksheet.range("A2:F100").clear_styles() # 保留值和公式
-worksheet.range("A2:F100").clear()        # 内容和样式都清除
+worksheet.range("A2:F100").clear(values=True, styles=False)  # 只清内容
+worksheet.range("A2:F100").clear(values=False, styles=True)  # 只清样式
+worksheet.range("A2:F100").clear()                           # 内容和样式
 ```
+
+不再提供重复的 `clear_values()` 和 `clear_styles()`。
 
 ### `Range.copy_to(target, *, values=True, formulas=True, styles=True)`
 
@@ -2496,12 +2491,13 @@ worksheet.add_conditional_format(
 ### `Worksheet.auto_filter`
 
 功能：返回 `AutoFilter` 代理。其 `range` 可读写筛选 A1 区域，`filters` 返回以
-区域内 0-based 列偏移为键的筛选值字典；`add(column, values)` 设置一个值筛选并返回
-代理，`clear()` 清除区域及全部条件。`column` 不能为负数或布尔值。
+区域内 0-based 列偏移为键的筛选值字典副本；`set(column, values)` 设置或替换一个
+值筛选并返回代理，`apply()` 在内存中隐藏不匹配行，`clear()` 清除区域及全部条件。
+`column` 不能为负数或布尔值。
 
 ```python
 worksheet.auto_filter.range = "A1:D100"
-worksheet.auto_filter.add(2, ["通过", "待审核"])
+worksheet.auto_filter.set(2, ["通过", "待审核"])
 ```
 
 ## 15.2 0.6.0 可视化、排序与公式 API
@@ -2583,14 +2579,14 @@ worksheet.sort(
 
 ### `AutoFilter.apply()`
 
-功能：根据 `auto_filter.add()` 已登记的值条件，将筛选区域内不匹配的数据行设为隐藏。
+功能：根据 `auto_filter.set()` 已登记的值条件，将筛选区域内不匹配的数据行设为隐藏。
 调用前必须设置 `worksheet.auto_filter.range`；列号相对于筛选区域且从 0 开始。没有
 筛选条件时会取消筛选区域数据行的隐藏状态；`auto_filter.clear()` 会清除区域、条件并
 恢复工作表中已创建行的可见状态。
 
 ```python
 worksheet.auto_filter.range = "A1:C100"
-worksheet.auto_filter.add(2, ["通过"])
+worksheet.auto_filter.set(2, ["通过"])
 worksheet.auto_filter.apply()
 ```
 
@@ -2704,7 +2700,7 @@ worksheet.range("A2:C100").clear(
 
 合并关系、行高、列宽、筛选和图表不会被 `Range.clear()` 改变。
 
-## 15.4 0.8.0 业务报表生产力 API
+## 15.4 0.8.1 业务报表生产力 API
 
 ### `Worksheet.write_records(row, column, records, *, headers=True)`
 
@@ -2787,17 +2783,15 @@ worksheet.range("B1:B1").auto_fill("B1:B100")
 `SERIES` 强制数值或日期序列；`FORMATS` 只复制样式。`SERIES` 的源区域必须是一行或一列
 的一格或两格数值、日期、日期时间序列。
 
-### `Worksheet.fill_formula(address, formula)`
-
-功能：在目标区域批量写入公式模板，自动按目标单元格位置调整相对引用。
+公式批量下拉也统一使用 `auto_fill()`：先为源单元格设置公式，再填充到目标区域。
 
 ```python
-worksheet.fill_formula("E2:E1000", "=C2*D2")
-# E3 自动保存为 =C3*D3
+worksheet["E2"].formula = "=C2*D2"
+worksheet.range("E2:E2").auto_fill("E2:E1000")
+# E3 自动保存为 =C3*D3；$A$1 等绝对引用保持不变。
 ```
 
-参数 `formula` 对应目标区域左上角；可带或省略 `=`。相对引用会移动，`$A$1` 等绝对引用
-保持不变。
+不再提供重复的 `Worksheet.fill_formula()`。
 
 ### `Range.remove_duplicates(columns=None, *, has_header=False)` 与 `Range.remove_blank_rows()`
 
@@ -2822,6 +2816,32 @@ worksheet.auto_fit_rows(0, 100, max_height=120)
 
 两个方法的首尾索引都是包含式 0-based 索引；列宽参数单位为 Excel 字符宽度，行高参数单位为
 磅。建议为长文本设置 `max_width`，并配合 `Alignment(wrap_text=True)` 使用。
+
+### `Worksheet.group_rows()` / `ungroup_rows()` / `group_columns()` / `ungroup_columns()`
+
+功能：创建或撤销 Excel 行列大纲分组。适合把明细行、月份列或辅助计算列折叠起来；连续调用
+分组方法会增加嵌套层级，撤销方法每次降低一级，层级为 0 时即不属于任何分组。
+
+参数：四个方法都接收包含首尾的 0-based `start`、`end` 索引，且必须满足
+`start <= end`。`group_rows()` 与 `group_columns()` 还有仅限关键字的
+`collapsed=False`；设为 `True` 时成员会隐藏，末尾维度带折叠标志，Excel/WPS 打开文件时
+显示为收起状态。Excel 大纲最多 7 层，超过时抛出 `ValueError`。
+
+返回：均返回当前 `Worksheet`，支持链式调用。参数类型、顺序或边界无效时抛出
+`TypeError`、`ValueError` 或 `InvalidAddressError`。
+
+```python
+# 折叠0-based第1～9行；对应 Excel 的第2～10行。
+worksheet.group_rows(1, 9, collapsed=True)
+
+# 为0-based第1～3列建立一个展开状态的分组，然后撤销一级。
+worksheet.group_columns(1, 3)
+worksheet.ungroup_columns(1, 3)
+```
+
+分组状态支持 XLSX 写出和读回，也会尽量写入 XLS。直接设置
+`worksheet.row(1).outline_level` 等底层属性虽可用，但批量业务代码推荐使用上述方法，
+以便正确维护隐藏和折叠状态。
 
 ### `Range.format.number`、`NumberFormat` 与 `Range.apply_style()` / `ReportStyle`
 
@@ -2894,14 +2914,14 @@ pages = workbook.render_many(
 worksheet.add_image(qrcode_bytes, anchor="G2", name="qrcode.png")
 ```
 
-## 16. 0.8.0 能力边界
+## 16. 0.8.1 能力边界
 
-0.8.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+0.8.1 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.0
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.1
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2934,18 +2954,18 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.8.0 API 速查表
+## 18. 0.8.1 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
-| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`render_many`、`export_pages`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`read_records`、`fill_formula`、`auto_fit_columns`、`auto_fit_rows`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
-| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
+| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`properties`、`protection`、`load`、`render`、`render_many`、`export_pages`、`calculate`、`save`、`len()` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`read_records`、`auto_fit_columns`、`auto_fit_rows`、`group_rows`、`ungroup_rows`、`group_columns`、`ungroup_columns`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`hyperlinks`、`add_validation`、`validations`、`remove_validation`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`remove_conditional_format`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`dependencies`、`dependents`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
-| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |
+| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear`、`copy_to`、`merge`、`unmerge` |
 | `NamedRange` | `name`、`worksheet`、`range` |
 | `Table` | `name`、`worksheet`、`range`、`columns`、`records`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`set_total`、`resize`、`append`、`append_rows`、`append_records`、`clear_data` |
-| 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
+| 行列尺寸 | `RowDimension.index/height/hidden/outline_level/collapsed`、`ColumnDimension.index/width/hidden/outline_level/collapsed` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
 | `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`range_index`、`range_address`、`cell_address` |
 | `excelkit.errors` | `ExcelKitError`、`InvalidAddressError`、`InvalidWorksheetNameError`、`InvalidFileError`、`TemplateError`、`FormulaCalculationError` |
