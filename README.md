@@ -1,14 +1,14 @@
-# ExcelKit 0.7.0
+# ExcelKit 0.7.1
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.7.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.7.1 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.7.0-py3-none-any.whl
+pip install excelkit-0.7.1-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -434,7 +434,14 @@ from excelkit.writer.xlsx import XlsxWriter
 XlsxWriter(workbook).write("demo.xlsx")
 ```
 
-## 0.7.0 能力边界
+## 可运行示例
+
+`examples/` 目录提供覆盖核心对象、公式、样式、模板、读写、打印和数据整理的独立示例。
+其中 [16_search_replace_and_export.py](examples/16_search_replace_and_export.py) 演示查找、
+替换和 CSV 导出；[17_visual_sort_filter.py](examples/17_visual_sort_filter.py) 演示图表、
+图片、批注、排序、筛选和可见性。
+
+## 0.7.1 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域

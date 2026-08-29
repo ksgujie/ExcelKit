@@ -1,14 +1,39 @@
-# ExcelKit 0.7.0 完整中文使用与 API 手册
+# ExcelKit 0.7.1 完整中文使用与 API 手册
 
-版本：0.7.0
+版本：0.7.1
 适用对象：ExcelKit 使用者、二次开发者和维护者
+
+## 目录
+
+- [1. 安装与导入](#1-安装与导入)
+- [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
+- [3. 顶层版本 API](#3-顶层版本-api)
+  - [3.1 0.5.0 至 0.7.1 新增功能速查](#31-050-至-071-新增功能速查)
+- [4. Workbook 工作簿](#4-workbook-工作簿)
+- [5. Worksheet 工作表](#5-worksheet-工作表)
+- [6. Cell 单元格](#6-cell-单元格)
+- [7. 样式类型](#7-样式类型)
+- [8. Range 区域](#8-range-区域)
+- [9. 页面布局与打印 API](#9-页面布局与打印-api)
+- [10. address 地址工具](#10-address-地址工具)
+- [11. errors 异常](#11-errors-异常)
+- [12. XlsxWriter 高级写出 API](#12-xlsxwriter-高级写出-api)
+- [13. ValueStore 内部 API](#13-valuestore-内部-api)
+- [14. 普通值写出规则](#14-普通值写出规则)
+- [15. 可运行示例文件](#15-可运行示例文件)
+  - [15.1 工作表高级 API](#151-050-工作表高级-api)
+  - [15.2 可视化、排序与公式 API](#152-060-可视化排序与公式-api)
+  - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
+- [16. 0.7.1 能力边界](#16-071-能力边界)
+- [17. API 选择指南](#17-api-选择指南)
+- [18. 0.7.1 API 速查表](#18-071-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.7.0-py3-none-any.whl
+pip install excelkit-0.7.1-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -61,7 +86,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.7.0 新增功能速查
+## 3.1 0.5.0 至 0.7.1 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -140,7 +165,7 @@ ws.auto_filter.add(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.7.0"
+assert excelkit.__version__ == "0.7.1"
 ```
 
 ## 4. Workbook 工作簿
@@ -400,7 +425,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.7.0 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.7.1 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -2365,6 +2390,8 @@ assert list(store.items()) == [((0, 0), "A1")]
   XLSX 和 XLS 示例文件。
 - `14_formula_calculation.py`：公式缓存、Python 计算、状态、错误和只读类型转换。
 - `15_named_range_table_and_copy.py`：命名区域、基础 Table、样式复制与区域复制。
+- `16_search_replace_and_export.py`：查找、替换、清除超链接/批注和 CSV 导出。
+- `17_visual_sort_filter.py`：图表、图片、传统批注、排序、筛选与工作表可见性。
 - `create_excel.py`：组合示例。
 
 在项目根目录执行，例如：
@@ -2500,7 +2527,7 @@ chart.add_series(values="B2:B13", categories="A2:A13", name="销售额")
 
 ### `Worksheet.add_image(filename, *, anchor)` / `images`
 
-功能：在工作表中添加 PNG 或 JPEG 图片。`filename` 是现有图片路径，`anchor` 是图片
+功能：在工作表中添加 PNG 或 JPEG 图片。`filename` 是现有字符串或 `PathLike` 图片路径，`anchor` 是图片
 左上角的单个 A1 地址；返回 `Image`，`images` 返回只读元组。图片尺寸由原文件像素
 自动读取，随后可修改 `width`、`height`、`offset_x`、`offset_y` 和 `alt_text`；前四项
 均为像素。`Image.remove()` 删除图片并返回所属工作表。
@@ -2673,14 +2700,14 @@ worksheet.range("A2:C100").clear(
 
 合并关系、行高、列宽、筛选和图表不会被 `Range.clear()` 改变。
 
-## 16. 0.7.0 能力边界
+## 16. 0.7.1 能力边界
 
-0.7.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+0.7.1 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.7.0
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.7.1
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2713,7 +2740,7 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.7.0 API 速查表
+## 18. 0.7.1 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|

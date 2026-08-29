@@ -709,17 +709,20 @@ class Worksheet:
             raise ValueError("图表不属于当前工作表")
         self._charts.remove(chart)
 
-    def add_image(self, filename: str, *, anchor: str) -> Image:
+    def add_image(
+        self, filename: str | os.PathLike[str], *, anchor: str
+    ) -> Image:
         """功能：在当前工作表添加 PNG 或 JPEG 图片。
 
         使用方法：``image = ws.add_image('logo.png', anchor='A1')``。
-        参数：``filename`` 为图片文件路径；``anchor`` 为左上角单个 A1 地址。
+        参数：``filename`` 为字符串或 ``PathLike`` 图片文件路径；``anchor`` 为左上角
+        单个 A1 地址。
         返回：新建 ``Image``；其 ``width``、``height`` 为像素，``offset_x``、
         ``offset_y`` 为像素偏移，均可在保存前修改。
         异常：路径、格式或锚点无效时抛出文件系统异常、``TypeError`` 或 ``ValueError``。
         """
-        if not isinstance(filename, str):
-            raise TypeError("filename 必须是字符串路径")
+        if not isinstance(filename, (str, os.PathLike)):
+            raise TypeError("filename 必须是字符串或 PathLike 图片路径")
         row, column = cell_index(anchor)
         image = Image(self, filename, cell_address(row, column))
         self._images.append(image)
