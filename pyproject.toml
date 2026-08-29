@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "excelkit"
-version = "0.7.1"
+version = "0.8.0"
 description = "A lightweight Python library for reading and writing Excel workbooks"
 readme = "README.md"
 requires-python = ">=3.9"

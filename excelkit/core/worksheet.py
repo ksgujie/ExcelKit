@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 import os
 import re
+import math
+import unicodedata
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from ..address import (
@@ -27,7 +29,7 @@ from .page import PageSettings
 from .range import Range
 from .table import Table
 from ..validation import Validation
-from ..conditional import ConditionalFormat
+from ..conditional import ConditionalFormat, IconSet
 from ..protection import Protection
 from ..filter import AutoFilter
 from ..note import Note
@@ -81,6 +83,7 @@ class Worksheet:
         "_filter_conditions",
         "_show_gridlines",
         "_page",
+        "_horizontal_page_breaks",
         "_tables",
         "_validations",
         "_conditionals",
@@ -118,6 +121,7 @@ class Worksheet:
         self._filter_conditions: dict[int, tuple[str, ...]] = {}
         self._show_gridlines = True
         self._page = PageSettings()
+        self._horizontal_page_breaks: set[int] = set()
         self._tables: Dict[str, Table] = {}
         self._validations: list[Validation] = []
         self._conditionals: list[ConditionalFormat] = []
@@ -424,6 +428,69 @@ class Worksheet:
         self._conditionals.append(item)
         return item
 
+    def add_color_scale(
+        self,
+        address: str,
+        *,
+        min_color: str = "F8696B",
+        mid_color: str | None = "FFEB84",
+        max_color: str = "63BE7B",
+    ) -> ConditionalFormat:
+        """功能：为区域添加按数值渐变着色的双色或三色条件格式。
+
+        使用方法：``ws.add_color_scale('C2:C100')``。
+        参数：``address`` 为 A1 区域；``min_color``、``max_color`` 为最低和最高值
+        颜色；``mid_color`` 为中间颜色，设为 ``None`` 时创建双色渐变。
+        返回：新建 :class:`ConditionalFormat`。
+        异常：区域或颜色无效时抛出 ``ValueError``。
+        """
+        colors = [min_color, max_color] if mid_color is None else [min_color, mid_color, max_color]
+        normalized = [_color(color) for color in colors]
+        item = ConditionalFormat(
+            self.range(address).address, rule="colorScale",
+            priority=len(self._conditionals) + 1, options={"colors": normalized},
+        )
+        self._conditionals.append(item)
+        return item
+
+    def add_data_bar(
+        self, address: str, *, color: str = "638EC6", show_value: bool = True
+    ) -> ConditionalFormat:
+        """功能：为数值区域添加按最小值和最大值自动缩放的数据条。
+
+        使用方法：``ws.add_data_bar('D2:D100', color='5B9BD5')``。
+        参数：``address`` 为 A1 区域；``color`` 为数据条 RGB/ARGB 色值；
+        ``show_value`` 控制是否保留单元格数值显示。
+        返回：新建 :class:`ConditionalFormat`。
+        异常：颜色或开关类型无效时抛出 ``ValueError`` 或 ``TypeError``。
+        """
+        if not isinstance(show_value, bool):
+            raise TypeError("show_value 必须是 bool")
+        item = ConditionalFormat(
+            self.range(address).address, rule="dataBar",
+            priority=len(self._conditionals) + 1,
+            options={"color": _color(color), "show_value": show_value},
+        )
+        self._conditionals.append(item)
+        return item
+
+    def add_icon_set(
+        self, address: str, *, style: str = IconSet.THREE_TRAFFIC_LIGHTS
+    ) -> ConditionalFormat:
+        """功能：为区域添加按百分位自动分档的 Excel 图标集条件格式。
+
+        使用方法：``ws.add_icon_set('E2:E100', style=IconSet.THREE_TRAFFIC_LIGHTS)``。
+        参数：``address`` 为 A1 区域；``style`` 为 ``IconSet`` 固定值。
+        返回：新建 :class:`ConditionalFormat`。
+        异常：区域或图标集类型无效时抛出 ``ValueError``。
+        """
+        item = ConditionalFormat(
+            self.range(address).address, rule="iconSet",
+            priority=len(self._conditionals) + 1, options={"style": style},
+        )
+        self._conditionals.append(item)
+        return item
+
     @property
     def conditional_formats(self) -> tuple[ConditionalFormat, ...]:
         """功能：取得工作表全部条件格式规则的只读快照。"""
@@ -710,21 +777,26 @@ class Worksheet:
         self._charts.remove(chart)
 
     def add_image(
-        self, filename: str | os.PathLike[str], *, anchor: str
+        self,
+        source: str | os.PathLike[str] | bytes,
+        *,
+        anchor: str,
+        name: str | None = None,
     ) -> Image:
         """功能：在当前工作表添加 PNG 或 JPEG 图片。
 
-        使用方法：``image = ws.add_image('logo.png', anchor='A1')``。
-        参数：``filename`` 为字符串或 ``PathLike`` 图片文件路径；``anchor`` 为左上角
-        单个 A1 地址。
+        使用方法：``image = ws.add_image('logo.png', anchor='A1')``；内存二维码可用
+        ``ws.add_image(payload, anchor='A1', name='qrcode.png')``。
+        参数：``source`` 为字符串、``PathLike`` 图片路径或 PNG/JPEG ``bytes``；
+        ``anchor`` 为左上角单个 A1 地址；二进制图片需要 ``name`` 提供文件名。
         返回：新建 ``Image``；其 ``width``、``height`` 为像素，``offset_x``、
         ``offset_y`` 为像素偏移，均可在保存前修改。
         异常：路径、格式或锚点无效时抛出文件系统异常、``TypeError`` 或 ``ValueError``。
         """
-        if not isinstance(filename, (str, os.PathLike)):
-            raise TypeError("filename 必须是字符串或 PathLike 图片路径")
+        if not isinstance(source, (str, os.PathLike, bytes)):
+            raise TypeError("source 必须是字符串、PathLike 图片路径或 bytes")
         row, column = cell_index(anchor)
-        image = Image(self, filename, cell_address(row, column))
+        image = Image(self, source, cell_address(row, column), name=name)
         self._images.append(image)
         return image
 
@@ -866,6 +938,269 @@ class Worksheet:
             return []
         end_address = cell_address(self._max_row, self._max_column)
         return self.range(f"A1:{end_address}").values
+
+    @staticmethod
+    def _prepare_records(
+        records: Iterable[Mapping[str, Any]], headers: bool | Sequence[str]
+    ) -> tuple[list[Mapping[str, Any]], tuple[str, ...], bool]:
+        """功能：完整验证字典记录并确定稳定的字段顺序。
+
+        使用方法：由 ``write_records`` 和 ``write_table`` 在写入前共同调用。
+        参数：``records`` 为映射记录迭代对象；``headers`` 为 ``True``、``False``
+        或显式字段名称序列。
+        返回：规范化的记录列表、字段名称元组及是否写入表头。
+        异常：记录、字段名或表头参数不合法时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        try:
+            prepared = list(records)
+        except TypeError as error:
+            raise TypeError("records 必须是映射记录的可迭代对象") from error
+        if any(not isinstance(record, Mapping) for record in prepared):
+            raise TypeError("records 中的每条记录必须是映射对象")
+        if isinstance(headers, bool):
+            include_headers = headers
+            names: list[str] = []
+            for record in prepared:
+                for key in record:
+                    if not isinstance(key, str) or not key:
+                        raise ValueError("记录字段名必须是非空字符串")
+                    if key not in names:
+                        names.append(key)
+        else:
+            if isinstance(headers, (str, bytes)):
+                raise TypeError("headers 必须是 bool 或字段名序列")
+            try:
+                names = list(headers)
+            except TypeError as error:
+                raise TypeError("headers 必须是 bool 或字段名序列") from error
+            include_headers = True
+            if not names or any(not isinstance(name, str) or not name for name in names):
+                raise ValueError("headers 必须是非空字符串的非空序列")
+            if len(set(names)) != len(names):
+                raise ValueError("headers 不能包含重复字段名")
+        if not names:
+            raise ValueError("没有可写入的字段；空 records 时请提供 headers 字段序列")
+        unknown = {
+            key for record in prepared for key in record if key not in names
+        }
+        if unknown:
+            raise ValueError(f"记录包含 headers 中不存在的字段：{sorted(unknown)!r}")
+        return prepared, tuple(names), include_headers
+
+    def write_records(
+        self,
+        row: int,
+        column: int,
+        records: Iterable[Mapping[str, Any]],
+        *,
+        headers: bool | Sequence[str] = True,
+    ) -> Range:
+        """功能：从指定 0-based 行列开始写入字典记录，字段名决定列顺序。
+
+        使用方法：``ws.write_records(0, 0, orders)``；空记录需要显式传入
+        ``headers=['订单号', '金额']``。设置 ``headers=False`` 可只写数据行。
+        参数：``row``、``column`` 为起始 0-based 索引，顺序先行后列；``records``
+        为字典或其他映射对象序列；``headers`` 可为 ``True``（按首次出现的字段顺序
+        写表头）、``False``（不写表头）或字段名序列（写指定顺序表头）。
+        返回：覆盖写入区域；只有表头时返回一行区域。
+        异常：索引、字段、目标合并单元格或数据不合法时抛出 ``TypeError``、
+        ``ValueError`` 或 ``InvalidAddressError``。
+        """
+        validate_row_index(row)
+        validate_column_index(column)
+        prepared, names, include_headers = self._prepare_records(records, headers)
+        row_values: list[list[Any]] = [list(names)] if include_headers else []
+        row_values.extend([[record.get(name) for name in names] for record in prepared])
+        if not row_values:
+            raise ValueError("headers=False 时 records 不能为空")
+        end_row = row + len(row_values) - 1
+        end_column = column + len(names) - 1
+        validate_row_index(end_row)
+        validate_column_index(end_column)
+        area = Range(self, row, column, end_row, end_column)
+        area.set_values(row_values)
+        return area
+
+    def _next_table_name(self) -> str:
+        """功能：生成当前工作簿中尚未使用的默认数据表名称。"""
+        index = 1
+        while self._workbook._table(f"Table{index}") is not None:
+            index += 1
+        return f"Table{index}"
+
+    def write_table(
+        self,
+        row: int,
+        column: int,
+        records: Iterable[Mapping[str, Any]],
+        *,
+        headers: Sequence[str] | None = None,
+        name: str | None = None,
+        style: str = "TableStyleMedium2",
+        freeze_header: bool = False,
+        auto_fit: bool = False,
+    ) -> Table:
+        """功能：一次写入字典记录并创建带筛选按钮的 Excel 数据表。
+
+        使用方法：``table = ws.write_table(0, 0, orders, name='Orders',
+        freeze_header=True, auto_fit=True)``。
+        参数：``row``、``column`` 为 0-based 起始位置；``records`` 为映射记录；
+        ``headers`` 可指定空数据时的字段顺序；``name`` 省略时自动生成 ``Table1``；
+        ``style`` 为 Excel 表格样式；``freeze_header`` 冻结表头上方行；``auto_fit``
+        自动调整写入列宽。
+        返回：新建 :class:`Table`。
+        异常：记录、区域、名称、样式或布尔参数无效时抛出相应异常。
+        """
+        if headers is not None and (isinstance(headers, (str, bytes)) or not isinstance(headers, Sequence)):
+            raise TypeError("headers 必须是字段名序列或 None")
+        if not isinstance(freeze_header, bool) or not isinstance(auto_fit, bool):
+            raise TypeError("freeze_header 和 auto_fit 必须是 bool")
+        area = self.write_records(row, column, records, headers=headers if headers is not None else True)
+        table = self.add_table(area.address, name=name or self._next_table_name(), style=style)
+        if freeze_header:
+            validate_row_index(row + 1)
+            self.freeze_panes = cell_address(row + 1, 0)
+        if auto_fit:
+            self.auto_fit_columns(area.min_column, area.max_column)
+        return table
+
+    def read_records(self, address: str, *, headers: bool = True) -> list[dict[str, Any]]:
+        """功能：把一个连续区域读取为按首行字段组织的字典记录。
+
+        使用方法：``orders = ws.read_records('A1:C100')``。
+        参数：``address`` 为 A1 区域；``headers`` 为真时首行作字段名且不返回，
+        为假时自动使用 ``Column1``、``Column2`` 等字段名并返回全部行。
+        返回：按区域行顺序组成的字典列表。
+        异常：区域为空、字段名为空或重复、``headers`` 类型无效时抛出 ``ValueError``
+        或 ``TypeError``。
+        """
+        if not isinstance(headers, bool):
+            raise TypeError("headers 必须是 bool")
+        area = self.range(address)
+        values = area.values
+        if headers:
+            header_values = values[0]
+            if any(not isinstance(value, str) or not value for value in header_values):
+                raise ValueError("表头必须全部是非空字符串")
+            names = tuple(header_values)
+            if len(set(names)) != len(names):
+                raise ValueError("表头不能重复")
+            values = values[1:]
+        else:
+            names = tuple(f"Column{index}" for index in range(1, len(values[0]) + 1))
+        return [dict(zip(names, row_values)) for row_values in values]
+
+    @staticmethod
+    def _display_width(value: Any) -> int:
+        """功能：按中日韩全角字符宽度估算单元格显示宽度。"""
+        text = str(value)
+        return max(
+            sum(2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1 for char in line)
+            for line in text.splitlines() or [""]
+        )
+
+    def auto_fit_columns(
+        self,
+        first_column: int,
+        last_column: int,
+        *,
+        min_width: float = 0,
+        max_width: float = 40,
+    ) -> "Worksheet":
+        """功能：根据已使用单元格内容自动设置连续列的宽度。
+
+        使用方法：``ws.auto_fit_columns(0, 5, max_width=40)``。
+        参数：``first_column``、``last_column`` 为包含式 0-based 列索引；
+        ``min_width`` 为最小宽度，``max_width`` 为最大宽度，均为正数或零。
+        返回：当前工作表。
+        异常：索引、宽度或顺序无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        validate_column_index(first_column)
+        validate_column_index(last_column)
+        if first_column > last_column:
+            raise ValueError("first_column 不能大于 last_column")
+        for name, value in (("min_width", min_width), ("max_width", max_width)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                raise ValueError(f"{name} 必须是大于等于0的数字")
+        if min_width > max_width or max_width > 255:
+            raise ValueError("宽度必须满足 0 <= min_width <= max_width <= 255")
+        for column in range(first_column, last_column + 1):
+            width = min_width
+            for row in range(self._max_row + 1):
+                value = self._formulas.get((row, column), self._values.get(row, column))
+                if value is not None:
+                    width = max(width, self._display_width(value) + 2)
+            self.column(column).width = max(0.1, min(float(max_width), float(width)))
+        return self
+
+    def auto_fit_rows(
+        self,
+        first_row: int,
+        last_row: int,
+        *,
+        min_height: float = 0,
+        max_height: float = 120,
+    ) -> "Worksheet":
+        """功能：根据换行和当前列宽估算连续行的合适行高。
+
+        使用方法：``ws.auto_fit_rows(0, 100)``。
+        参数：``first_row``、``last_row`` 为包含式 0-based 行索引；``min_height``
+        和 ``max_height`` 为磅值边界，0 表示不设下限。
+        返回：当前工作表。
+        异常：索引、边界或顺序无效时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        validate_row_index(first_row)
+        validate_row_index(last_row)
+        if first_row > last_row:
+            raise ValueError("first_row 不能大于 last_row")
+        for name, value in (("min_height", min_height), ("max_height", max_height)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                raise ValueError(f"{name} 必须是大于等于0的数字")
+        if min_height > max_height or max_height > 409:
+            raise ValueError("高度必须满足 0 <= min_height <= max_height <= 409")
+        for row in range(first_row, last_row + 1):
+            lines = 1
+            for column in range(self._max_column + 1):
+                value = self._formulas.get((row, column), self._values.get(row, column))
+                if value is None:
+                    continue
+                available = self.column(column).width or 8.43
+                lines = max(lines, math.ceil(self._display_width(value) / available))
+            self.row(row).height = max(0.1, min(float(max_height), max(float(min_height), lines * 15.0)))
+        return self
+
+    @property
+    def horizontal_page_breaks(self) -> tuple[int, ...]:
+        """功能：取得全部手动水平分页符所在的 0-based 行索引快照。"""
+        return tuple(sorted(self._horizontal_page_breaks))
+
+    def add_horizontal_page_break(self, row: int) -> "Worksheet":
+        """功能：在指定 0-based 行之前插入一个手动水平打印分页符。
+
+        使用方法：``ws.add_horizontal_page_break(49)`` 让第 49 行从新页开始。
+        参数：``row`` 为 1 以上的 0-based 行索引，``0`` 不能作为分页符位置。
+        返回：当前工作表。
+        异常：索引无效或为 ``0`` 时抛出 ``ValueError``。
+        """
+        validate_row_index(row)
+        if row == 0:
+            raise ValueError("分页符不能设置在第 0 行之前")
+        self._horizontal_page_breaks.add(row)
+        return self
+
+    def remove_horizontal_page_break(self, row: int) -> "Worksheet":
+        """功能：移除指定行之前的手动水平分页符。
+
+        使用方法：``ws.remove_horizontal_page_break(49)``。
+        参数：``row`` 为已设置分页符的 0-based 行索引。
+        返回：当前工作表。
+        异常：位置未设置分页符或索引无效时抛出 ``ValueError``。
+        """
+        validate_row_index(row)
+        if row not in self._horizontal_page_breaks:
+            raise ValueError("该位置不存在手动水平分页符")
+        self._horizontal_page_breaks.remove(row)
+        return self
 
     @staticmethod
     def _prepare_append_row(values: Iterable[Any], method_name: str) -> list[Any]:
@@ -1497,6 +1832,30 @@ class Worksheet:
         self._formulas[(row, column)] = f"={expression}"
         self._formula_values.pop((row, column), None)
         self._formula_errors.pop((row, column), None)
+
+    def fill_formula(self, address: str, formula: str) -> Range:
+        """功能：把一个公式模板填入区域，并按位置自动调整相对 A1 引用。
+
+        使用方法：``ws.fill_formula('E2:E100', '=C2*D2')``；首个单元格保存原公式，
+        后续单元格会像 Excel 向下或向右填充一样调整相对引用。
+        参数：``address`` 为目标 A1 区域；``formula`` 为对应区域左上角的公式文本，
+        可带或不带 ``=``。
+        返回：目标 :class:`Range`。
+        异常：区域、公式或合并区域不合法时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        area = self.range(address)
+        if not isinstance(formula, str):
+            raise TypeError("formula 必须是字符串")
+        from ..template import _translate_formula
+
+        for row in range(area.min_row, area.max_row + 1):
+            for column in range(area.min_column, area.max_column + 1):
+                translated = _translate_formula(
+                    formula, row - area.min_row, column - area.min_column
+                )
+                self._set_formula(row, column, translated, invalidate=False)
+        self._workbook._invalidate_formula_caches()
+        return area
 
     def _get_cached_value(self, row: int, column: int) -> Any:
         """功能：读取公式最近一次由外部表格软件保存的缓存结果。

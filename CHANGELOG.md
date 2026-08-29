@@ -1,5 +1,19 @@
 # 更新日志
 
+## 0.8.0 - 2026-08-29
+
+- 新增业务记录 API：`Worksheet.write_records()`、`write_table()`、`read_records()`、
+  `Table.records` 与 `Table.append_records()`；一行代码即可将字典列表写成带筛选和
+  样式的 Excel 数据表。
+- 新增 `Range.auto_fill()` 及 `AutoFillMode`，支持数值/日期序列、公式相对引用、
+  样式、超链接和批注的填充；新增 `Worksheet.fill_formula()` 批量公式下拉。
+- 新增 `Range.remove_duplicates()`、`remove_blank_rows()`、自动列宽/行高、区域格式
+  代理、`NumberFormat` 和 `ReportStyle` 预设。
+- 新增 `Table.set_total()`、`TotalFunction`、双色/三色渐变、数据条、图标集、手动
+  水平打印分页、内存 PNG/JPEG 图片写入、`Workbook.export_pages()` 和
+  `Workbook.render_many()`。
+- 新增可运行示例 `18_business_report.py` 与 0.8.0 回归测试，更新完整中文 API 手册。
+
 ## 0.7.1 - 2026-08-29
 
 - 完整审查公开 API、文档代码块和全部可运行示例；补充自动检查以保证版本号、文档和

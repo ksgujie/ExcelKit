@@ -804,7 +804,10 @@ def _load_sheet_tables(
                     and style_info.get("showColumnStripes", "0") in {"1", "true", "True"}
                 ),
             )
-            table.show_totals = table_root.get("totalsRowShown", "0") in {"1", "true", "True"}
+            if table_root.get("totalsRowShown", "0") in {"1", "true", "True"}:
+                # 读取文件时 ref 已经包含实体汇总行，不能再次扩展边界。
+                table._show_totals = True
+                table._data_max_row = table.range.max_row - 1
             columns = table_root.find(_tag(_MAIN_NS, "tableColumns"))
             if columns is not None:
                 names = table.columns

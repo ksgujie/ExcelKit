@@ -1,6 +1,6 @@
-# ExcelKit 0.7.1 完整中文使用与 API 手册
+# ExcelKit 0.8.0 完整中文使用与 API 手册
 
-版本：0.7.1
+版本：0.8.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 目录
@@ -8,7 +8,7 @@
 - [1. 安装与导入](#1-安装与导入)
 - [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
 - [3. 顶层版本 API](#3-顶层版本-api)
-  - [3.1 0.5.0 至 0.7.1 新增功能速查](#31-050-至-071-新增功能速查)
+  - [3.1 0.5.0 至 0.8.0 新增功能速查](#31-050-至-080-新增功能速查)
 - [4. Workbook 工作簿](#4-workbook-工作簿)
 - [5. Worksheet 工作表](#5-worksheet-工作表)
 - [6. Cell 单元格](#6-cell-单元格)
@@ -24,16 +24,17 @@
   - [15.1 工作表高级 API](#151-050-工作表高级-api)
   - [15.2 可视化、排序与公式 API](#152-060-可视化排序与公式-api)
   - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
-- [16. 0.7.1 能力边界](#16-071-能力边界)
+  - [15.4 业务报表生产力 API](#154-080-业务报表生产力-api)
+- [16. 0.8.0 能力边界](#16-080-能力边界)
 - [17. API 选择指南](#17-api-选择指南)
-- [18. 0.7.1 API 速查表](#18-071-api-速查表)
+- [18. 0.8.0 API 速查表](#18-080-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.7.1-py3-none-any.whl
+pip install excelkit-0.8.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -48,13 +49,15 @@ from excelkit import (
 样式、页面、地址和异常分别从分类模块导入：
 
 ```python
-from excelkit.style import Style, Border, BorderSide, Alignment
+from excelkit.style import Style, Border, BorderSide, Alignment, NumberFormat, ReportStyle
 from excelkit.page_setup import PageSettings, PageMargins, HeaderFooter
 from excelkit.address import cell_index, cell_address
 from excelkit.errors import InvalidAddressError
 from excelkit.hyperlink import Hyperlink
 from excelkit.validation import Validation
-from excelkit.conditional import ConditionalFormat
+from excelkit.conditional import ConditionalFormat, IconSet
+from excelkit.autofill import AutoFillMode
+from excelkit.table import TotalFunction
 from excelkit.filter import AutoFilter
 from excelkit.protection import Protection
 from excelkit.chart import Chart, ChartLegend, ChartSeries, ChartType
@@ -86,7 +89,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.7.1 新增功能速查
+## 3.1 0.5.0 至 0.8.0 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -165,7 +168,7 @@ ws.auto_filter.add(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.7.1"
+assert excelkit.__version__ == "0.8.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -425,7 +428,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.7.1 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.8.0 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -2392,6 +2395,7 @@ assert list(store.items()) == [((0, 0), "A1")]
 - `15_named_range_table_and_copy.py`：命名区域、基础 Table、样式复制与区域复制。
 - `16_search_replace_and_export.py`：查找、替换、清除超链接/批注和 CSV 导出。
 - `17_visual_sort_filter.py`：图表、图片、传统批注、排序、筛选与工作表可见性。
+- `18_business_report.py`：字典记录、Table、批量公式、自动填充、条件格式、汇总和打印分页。
 - `create_excel.py`：组合示例。
 
 在项目根目录执行，例如：
@@ -2700,14 +2704,204 @@ worksheet.range("A2:C100").clear(
 
 合并关系、行高、列宽、筛选和图表不会被 `Range.clear()` 改变。
 
-## 16. 0.7.1 能力边界
+## 15.4 0.8.0 业务报表生产力 API
 
-0.7.1 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+### `Worksheet.write_records(row, column, records, *, headers=True)`
+
+功能：从指定坐标开始写入字典记录。记录字段首次出现的顺序决定列顺序；也可通过
+`headers` 显式固定字段顺序。数字坐标统一为 **0-based、先行后列**。
+
+```python
+orders = [{"订单号": "SO-001", "金额": 120.5}, {"订单号": "SO-002", "金额": 88}]
+area = worksheet.write_records(0, 0, orders)
+assert area.address == "A1:B3"
+
+# 空记录也能写表头；字段顺序稳定。
+worksheet.write_records(0, 4, [], headers=["客户", "联系人"])
+```
+
+`headers=True`（默认）写入字段表头；`headers=False` 只写数据行；传入字段名序列会按该
+序列写表头和数据列。记录中出现但不在显式 `headers` 内的字段会抛出 `ValueError`，避免
+静默遗漏业务字段。
+
+### `Worksheet.write_table(row, column, records, *, headers=None, name=None, style="TableStyleMedium2", freeze_header=False, auto_fit=False)`
+
+功能：写入字典记录后立即创建 Excel Table。适合订单、库存、客户、财务流水等报表；Excel
+打开文件后表头自带筛选下拉按钮。`name` 省略时自动生成 `Table1` 等唯一名称。
+
+```python
+table = worksheet.write_table(
+    0, 0, orders,
+    name="Orders",
+    freeze_header=True,
+    auto_fit=True,
+)
+```
+
+`freeze_header=True` 冻结表头上方行；`auto_fit=True` 只自动调整新表涉及的列。返回的
+`Table` 可继续追加记录或配置汇总行。
+
+### `Worksheet.read_records(address, *, headers=True)` 与 `Table.records`
+
+功能：把连续区域或现有 Table 转为字典列表。常用于把 Excel 数据交还给业务代码。
+
+```python
+records = worksheet.read_records("A1:B100")
+records = worksheet.table("Orders").records
+```
+
+区域读取默认要求首行表头为不重复的非空字符串。`headers=False` 时全部行都是数据，字段名
+自动为 `Column1`、`Column2` 等。
+
+### `Table.append_records(records)`、`Table.set_total(column, function)` 与 `TotalFunction`
+
+功能：向已有 Table 追加字典记录，并在指定列显示 Excel 汇总函数。
+
+```python
+from excelkit.table import TotalFunction
+
+table.append_records([{"订单号": "SO-003", "金额": 199.0}])
+table.set_total("金额", TotalFunction.SUM)
+```
+
+支持的固定函数：`TotalFunction.SUM`、`AVERAGE`、`COUNT`、`COUNT_NUMS`、`MIN`、`MAX`。
+`set_total()` 会自动令 `table.show_totals = True`。字典中的未知字段会报错，缺少字段则写入
+空单元格。
+
+### `Range.auto_fill(target, *, mode=AutoFillMode.AUTO)` 与 `AutoFillMode`
+
+功能：模拟 Excel 选中源区域后拖动填充柄。源区域调用此方法，目标必须从同一左上角开始并
+包含源区域；值、公式、样式、超链接和批注会一起扩展。
+
+```python
+from excelkit.autofill import AutoFillMode
+
+worksheet.range("A1:A2").set_values([[1], [2]])
+worksheet.range("A1:A2").auto_fill("A1:A100", mode=AutoFillMode.SERIES)
+
+worksheet["B1"].formula = "=A1*2"
+worksheet.range("B1:B1").auto_fill("B1:B100")
+```
+
+模式均为 IDE 可提示常量：`AUTO` 自动判断数值/日期序列，否则复制模式；`COPY` 重复源模式；
+`SERIES` 强制数值或日期序列；`FORMATS` 只复制样式。`SERIES` 的源区域必须是一行或一列
+的一格或两格数值、日期、日期时间序列。
+
+### `Worksheet.fill_formula(address, formula)`
+
+功能：在目标区域批量写入公式模板，自动按目标单元格位置调整相对引用。
+
+```python
+worksheet.fill_formula("E2:E1000", "=C2*D2")
+# E3 自动保存为 =C3*D3
+```
+
+参数 `formula` 对应目标区域左上角；可带或省略 `=`。相对引用会移动，`$A$1` 等绝对引用
+保持不变。
+
+### `Range.remove_duplicates(columns=None, *, has_header=False)` 与 `Range.remove_blank_rows()`
+
+功能：原地清理一块区域的重复记录或完全空白行，剩余数据向上连续排列。返回实际删除行数。
+
+```python
+removed = worksheet.range("A1:F1000").remove_duplicates([0], has_header=True)
+blank_count = worksheet.range("A1:F1000").remove_blank_rows()
+```
+
+`columns` 的值相对于区域最左列，且为 0-based，例如 `[0, 2]` 表示以区域第 1、3 列为
+联合去重键。两种清理操作均拒绝与合并单元格相交的区域，防止破坏合并关系。
+
+### `Worksheet.auto_fit_columns()` 与 `Worksheet.auto_fit_rows()`
+
+功能：按内容估算列宽和行高；中文、日文、韩文等全角字符按双倍宽度计算。
+
+```python
+worksheet.auto_fit_columns(0, 5, max_width=40)
+worksheet.auto_fit_rows(0, 100, max_height=120)
+```
+
+两个方法的首尾索引都是包含式 0-based 索引；列宽参数单位为 Excel 字符宽度，行高参数单位为
+磅。建议为长文本设置 `max_width`，并配合 `Alignment(wrap_text=True)` 使用。
+
+### `Range.format.number`、`NumberFormat` 与 `Range.apply_style()` / `ReportStyle`
+
+功能：批量设置数值格式或应用完整样式。`Range.format.number` 不会改变单元格原始值。
+
+```python
+from excelkit.style import NumberFormat, ReportStyle
+
+worksheet.range("E2:E100").format.number = NumberFormat.CURRENCY
+worksheet.range("A1:E1").apply_style(ReportStyle.HEADER)
+```
+
+可提示格式常量包括 `GENERAL`、`INTEGER`、`DECIMAL`、`PERCENTAGE`、`CURRENCY`、`DATE`、
+`DATETIME`、`TEXT`。预设样式包含 `ReportStyle.HEADER`、`SUBHEADER`、`TOTAL`。
+
+### 高级条件格式：`add_color_scale()`、`add_data_bar()`、`add_icon_set()`
+
+功能：以 Excel 原生条件格式显示业务数据的趋势和分级；不改变原始单元格数值。
+
+```python
+from excelkit.conditional import IconSet
+
+worksheet.add_color_scale("C2:C100")
+worksheet.add_data_bar("D2:D100", color="5B9BD5")
+worksheet.add_icon_set("E2:E100", style=IconSet.THREE_TRAFFIC_LIGHTS)
+```
+
+图标集风格使用 IDE 可提示常量：`THREE_ARROWS`、`THREE_TRAFFIC_LIGHTS`、`THREE_SIGNS`、
+`FOUR_ARROWS`、`FIVE_ARROWS`。
+
+### `Worksheet.add_horizontal_page_break(row)`
+
+功能：让指定 0-based 行从新打印页开始。`horizontal_page_breaks` 返回全部分页位置的只读
+升序元组；`remove_horizontal_page_break(row)` 可移除指定分页符。
+
+```python
+worksheet.add_horizontal_page_break(49)  # 第 49 行开始新页
+worksheet.page.fit(width=1)
+```
+
+### `Workbook.export_pages(records, *, rows_per_sheet=50000, sheet_name="Page", headers=None, style="TableStyleMedium2")`
+
+功能：把大量字典记录拆分为多张带表头和 Table 的工作表。适用于订单、流水、日志等超长
+明细报表。
+
+```python
+pages = workbook.export_pages(orders, rows_per_sheet=50000, sheet_name="订单")
+# 自动创建：订单1、订单2、……
+```
+
+### `Workbook.render_many(items, *, sheet_name, name_pattern="{sheet}_{index}", strict=False)`
+
+功能：用同一模板表批量复制并按各自数据渲染，原模板不会被修改。名称模式可使用模板名、
+从 1 开始的序号和当前数据字段。
+
+```python
+pages = workbook.render_many(
+    [{"name": "张三"}, {"name": "李四"}],
+    sheet_name="合同模板",
+    name_pattern="合同_{name}_{index}",
+)
+```
+
+### `Worksheet.add_image(source, *, anchor, name=None)` 的内存图片支持
+
+功能：原有文件路径调用保持不变；新增直接写入 PNG/JPEG 二进制内容，适合二维码、接口下载
+图片或内存生成图片。传入 `bytes` 时必须通过 `name` 提供一个文件名。
+
+```python
+worksheet.add_image(qrcode_bytes, anchor="G2", name="qrcode.png")
+```
+
+## 16. 0.8.0 能力边界
+
+0.8.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.7.1
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.0
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2740,24 +2934,27 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
 `fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
 
-## 18. 0.7.1 API 速查表
+## 18. 0.8.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
-| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`find`、`replace`、`export`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`load`、`render`、`render_many`、`export_pages`、`calculate`、`save`、`len()` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter_range`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`read_records`、`fill_formula`、`auto_fit_columns`、`auto_fit_rows`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`add_validation`、`validations`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
-| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |
+| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear_values`、`clear_styles`、`clear`、`copy_to`、`merge`、`unmerge` |
 | `NamedRange` | `name`、`worksheet`、`range` |
-| `Table` | `name`、`worksheet`、`range`、`columns`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`resize`、`append`、`append_rows`、`clear_data` |
+| `Table` | `name`、`worksheet`、`range`、`columns`、`records`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`set_total`、`resize`、`append`、`append_rows`、`append_records`、`clear_data` |
 | 行列尺寸 | `RowDimension.index/height/hidden`、`ColumnDimension.index/width/hidden` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
 | `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`range_index`、`range_address`、`cell_address` |
 | `excelkit.errors` | `ExcelKitError`、`InvalidAddressError`、`InvalidWorksheetNameError`、`InvalidFileError`、`TemplateError`、`FormulaCalculationError` |
 | `excelkit.hyperlink` | `Hyperlink` |
 | `excelkit.validation` | `Validation` |
-| `excelkit.conditional` | `ConditionalFormat` |
+| `excelkit.autofill` | `AutoFillMode` |
+| `excelkit.table` | `Table`、`TotalFunction` |
+| `excelkit.style` | `Style`、`NumberFormat`、`ReportStyle` 及基础样式类型 |
+| `excelkit.conditional` | `ConditionalFormat`、`IconSet` |
 | `excelkit.filter` | `AutoFilter` |
 | `excelkit.protection` | `Protection` |
 | `excelkit.chart` | `Chart`、`ChartSeries`、`ChartLegend`、`ChartType` |

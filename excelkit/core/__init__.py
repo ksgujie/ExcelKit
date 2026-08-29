@@ -7,7 +7,7 @@ from .named_range import NamedRange
 from .range import Range
 from .workbook import Workbook
 from .worksheet import Worksheet
-from .table import Table
+from .table import Table, TotalFunction
 
 __all__ = [
     "Workbook",
@@ -22,4 +22,5 @@ __all__ = [
     "HeaderFooter",
     "NamedRange",
     "Table",
+    "TotalFunction",
 ]

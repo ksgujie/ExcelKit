@@ -1060,8 +1060,47 @@ def sheet_xml(
             if dxf_id is not None:
                 attributes["dxfId"] = str(dxf_id)
         rule = ET.SubElement(group, _qname(_MAIN_NS, "cfRule"), attributes)
-        if conditional.formula is not None:
+        if conditional.rule == "colorScale":
+            scale = ET.SubElement(rule, _qname(_MAIN_NS, "colorScale"))
+            colors = conditional.options["colors"]
+            kinds = ("min", "max") if len(colors) == 2 else ("min", "percentile", "max")
+            for index, kind in enumerate(kinds):
+                attributes = {"type": kind}
+                if kind == "percentile":
+                    attributes["val"] = "50"
+                ET.SubElement(scale, _qname(_MAIN_NS, "cfvo"), attributes)
+                ET.SubElement(scale, _qname(_MAIN_NS, "color"), {"rgb": colors[index]})
+        elif conditional.rule == "dataBar":
+            bar = ET.SubElement(
+                rule, _qname(_MAIN_NS, "dataBar"),
+                {"showValue": "1" if conditional.options["show_value"] else "0"},
+            )
+            ET.SubElement(bar, _qname(_MAIN_NS, "cfvo"), {"type": "min"})
+            ET.SubElement(bar, _qname(_MAIN_NS, "cfvo"), {"type": "max"})
+            ET.SubElement(bar, _qname(_MAIN_NS, "color"), {"rgb": conditional.options["color"]})
+        elif conditional.rule == "iconSet":
+            icon_set = ET.SubElement(
+                rule, _qname(_MAIN_NS, "iconSet"), {"iconSet": conditional.options["style"]}
+            )
+            count = int(conditional.options["style"][0])
+            for index in range(count):
+                attributes = {"type": "percent", "val": str(index * 100 // count)}
+                if index:
+                    attributes["gte"] = "0"
+                ET.SubElement(icon_set, _qname(_MAIN_NS, "cfvo"), attributes)
+        elif conditional.formula is not None:
             ET.SubElement(rule, _qname(_MAIN_NS, "formula")).text = str(conditional.formula)
+
+    if sheet.horizontal_page_breaks:
+        breaks = ET.SubElement(
+            root, _qname(_MAIN_NS, "rowBreaks"),
+            {"count": str(len(sheet.horizontal_page_breaks)), "manualBreakCount": str(len(sheet.horizontal_page_breaks))},
+        )
+        for row in sheet.horizontal_page_breaks:
+            ET.SubElement(
+                breaks, _qname(_MAIN_NS, "brk"),
+                {"id": str(row), "min": "0", "max": "16383", "man": "1"},
+            )
 
     print_options = {
         "horizontalCentered": "1" if page.center_horizontal else "0",
@@ -1345,7 +1384,7 @@ class XlsxWriter:
                     )
                 for image_id, image in image_entries:
                     package.writestr(
-                        f"xl/media/image{image_id}.{image.format}", Path(image.filename).read_bytes()
+                        f"xl/media/image{image_id}.{image.format}", image.payload
                     )
                 for chart_id, chart in chart_entries:
                     package.writestr(f"xl/charts/chart{chart_id}.xml", chart_xml(chart))

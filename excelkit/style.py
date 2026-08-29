@@ -198,6 +198,24 @@ class Alignment:
             raise TypeError("wrap_text 必须是布尔值")
 
 
+class NumberFormat:
+    """常用 Excel 数字格式常量，供 IDE 自动补全。
+
+    使用方法：``area.format.number = NumberFormat.CURRENCY``。
+    参数：本类仅提供标准 Excel 格式字符串常量，不需要实例化。
+    返回：无。
+    """
+
+    GENERAL = "General"
+    INTEGER = "#,##0"
+    DECIMAL = "#,##0.00"
+    PERCENTAGE = "0.00%"
+    CURRENCY = '¥#,##0.00'
+    DATE = "yyyy-mm-dd"
+    DATETIME = "yyyy-mm-dd hh:mm:ss"
+    TEXT = "@"
+
+
 @dataclass(frozen=True)
 class Style:
     """组合字体、填充、边框、对齐和数字格式的完整单元格样式。"""
@@ -232,4 +250,32 @@ class Style:
 
 DEFAULT_STYLE = Style()
 
-__all__ = ["Font", "Fill", "BorderSide", "Border", "Alignment", "Style"]
+
+class ReportStyle:
+    """适合业务报表的常用完整样式预设。
+
+    使用方法：``worksheet.range('A1:F1').apply_style(ReportStyle.HEADER)``。
+    参数：本类仅提供不可变 :class:`Style` 常量，不需要实例化。
+    返回：无。
+    """
+
+    HEADER = Style(
+        font=Font(bold=True, color="FFFFFF"),
+        fill=Fill("4472C4"),
+        alignment=Alignment(horizontal=Alignment.HORIZONTAL_CENTER, vertical=Alignment.VERTICAL_CENTER),
+    )
+    SUBHEADER = Style(
+        font=Font(bold=True, color="FFFFFF"),
+        fill=Fill("5B9BD5"),
+        alignment=Alignment(horizontal=Alignment.HORIZONTAL_CENTER, vertical=Alignment.VERTICAL_CENTER),
+    )
+    TOTAL = Style(
+        font=Font(bold=True),
+        fill=Fill("D9EAF7"),
+        number_format=NumberFormat.DECIMAL,
+    )
+
+__all__ = [
+    "Font", "Fill", "BorderSide", "Border", "Alignment", "NumberFormat",
+    "Style", "ReportStyle",
+]

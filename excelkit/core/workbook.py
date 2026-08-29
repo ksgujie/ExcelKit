@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from copy import deepcopy
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -368,6 +368,7 @@ class Workbook:
             "headers": source._headers,
             "validations": deepcopy(source._validations),
             "conditionals": deepcopy(source._conditionals),
+            "horizontal_page_breaks": set(source._horizontal_page_breaks),
         }
         target = self.add_sheet(new_name)
         target._color = source._color
@@ -394,6 +395,7 @@ class Workbook:
         target._filter_range = source._filter_range
         target._show_gridlines = source._show_gridlines
         target._page = copied_state["page"]
+        target._horizontal_page_breaks = copied_state["horizontal_page_breaks"]
         target._max_row = source._max_row
         target._max_column = source._max_column
         for table in source.tables:
@@ -405,10 +407,15 @@ class Workbook:
                 show_row_stripes=table.show_row_stripes,
                 show_column_stripes=table.show_column_stripes,
             )
-            copied_table.show_totals = table.show_totals
+            if table.show_totals:
+                copied_table._data_max_row = table._data_max_row
+                copied_table._bounds = table._bounds
+                copied_table._show_totals = True
             copied_table.totals.update(table.totals)
         for image in source.images:
-            copied_image = target.add_image(image.filename, anchor=image.anchor)
+            copied_image = target.add_image(
+                image.payload, anchor=image.anchor, name=image.filename
+            )
             copied_image.width = image.width
             copied_image.height = image.height
             copied_image.offset_x = image.offset_x
@@ -578,6 +585,101 @@ class Workbook:
         return render_workbook(
             self, data, sheet_data=sheet_data, strict=strict
         )
+
+    def render_many(
+        self,
+        items: Iterable[Mapping[str, Any]],
+        *,
+        sheet_name: Union[str, int],
+        name_pattern: str = "{sheet}_{index}",
+        strict: bool = False,
+    ) -> tuple[Worksheet, ...]:
+        """功能：以一张模板工作表为蓝本，为多份独立数据复制并分别渲染工作表。
+
+        使用方法：``pages = wb.render_many(orders, sheet_name='模板')``；默认生成
+        ``模板_1``、``模板_2`` 等工作表。通过 ``name_pattern='{name}_{index}'``
+        可在名称中引用每条数据的字段和从1开始的序号。
+        参数：``items`` 为映射对象的可迭代序列；``sheet_name`` 为模板名称或 0-based
+        索引；``name_pattern`` 为 Python 格式化字符串，提供 ``sheet``、``index`` 和
+        当前记录字段；``strict`` 控制模板缺失字段是否报错。
+        返回：新创建并渲染完成的工作表元组；原模板保持不变。
+        异常：模板、记录、名称模式或渲染数据无效时抛出 ``TypeError``、``ValueError``、
+        ``KeyError`` 或 ``TemplateError``。
+        """
+        if not isinstance(name_pattern, str) or not name_pattern:
+            raise ValueError("name_pattern 必须是非空字符串")
+        if not isinstance(strict, bool):
+            raise TypeError("strict 必须是 bool")
+        template = self.sheet(sheet_name)
+        try:
+            prepared = list(items)
+        except TypeError as error:
+            raise TypeError("items 必须是映射对象的可迭代对象") from error
+        if any(not isinstance(item, Mapping) for item in prepared):
+            raise TypeError("items 中的每项必须是映射对象")
+        from ..template import _render_sheet
+
+        created: list[Worksheet] = []
+        for index, item in enumerate(prepared, 1):
+            try:
+                name = name_pattern.format(sheet=template.name, index=index, **item)
+            except (KeyError, ValueError) as error:
+                raise ValueError("name_pattern 包含无法解析的字段") from error
+            if not isinstance(name, str):
+                raise ValueError("name_pattern 必须格式化为字符串")
+            target = self.copy_sheet(template.name, name)
+            values, formulas, styles, max_row, max_column = _render_sheet(
+                target, item, strict
+            )
+            target._values._values = values
+            target._formulas = formulas
+            target._styles = styles
+            target._formula_values.clear()
+            target._formula_errors.clear()
+            target._max_row = max_row
+            target._max_column = max_column
+            created.append(target)
+        return tuple(created)
+
+    def export_pages(
+        self,
+        records: Iterable[Mapping[str, Any]],
+        *,
+        rows_per_sheet: int = 50000,
+        sheet_name: str = "Page",
+        headers: tuple[str, ...] | list[str] | None = None,
+        style: str = "TableStyleMedium2",
+    ) -> tuple[Worksheet, ...]:
+        """功能：把大量字典记录按固定最大行数拆分为多个带表头的数据工作表。
+
+        使用方法：``pages = wb.export_pages(records, rows_per_sheet=50000)``。
+        参数：``records`` 为映射记录序列；``rows_per_sheet`` 为每张表的数据行上限；
+        ``sheet_name`` 为工作表名称前缀；``headers`` 可为字段名序列，供空数据或
+        固定列顺序使用；``style`` 为每页 Excel 数据表样式。
+        返回：按页码顺序创建的工作表元组；每页均包含表头和 Excel Table。
+        异常：参数、工作表名称、数据表名称或记录不合法时抛出相应异常。
+        """
+        if isinstance(rows_per_sheet, bool) or not isinstance(rows_per_sheet, int) or rows_per_sheet < 1:
+            raise ValueError("rows_per_sheet 必须是正整数")
+        if not isinstance(sheet_name, str) or not sheet_name:
+            raise ValueError("sheet_name 必须是非空字符串")
+        try:
+            prepared = list(records)
+        except TypeError as error:
+            raise TypeError("records 必须是映射记录的可迭代对象") from error
+        if not prepared and headers is None:
+            raise ValueError("空 records 时必须提供 headers")
+        pages: list[Worksheet] = []
+        chunks = [prepared[index:index + rows_per_sheet] for index in range(0, len(prepared), rows_per_sheet)] or [[]]
+        for index, chunk in enumerate(chunks, 1):
+            worksheet = self.add_sheet(f"{sheet_name}{index}")
+            worksheet.write_table(
+                0, 0, chunk, headers=headers,
+                name=self._unique_table_name(f"{sheet_name}Table{index}"),
+                style=style, freeze_header=True, auto_fit=True,
+            )
+            pages.append(worksheet)
+        return tuple(pages)
 
     def calculate(self, *, strict: bool = False) -> "Workbook":
         """功能：在 Python 中计算当前版本支持的全部工作簿公式。

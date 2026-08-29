@@ -224,6 +224,10 @@ class XlsWriter:
             target_sheet.set_print_centered_vert(page.center_vertical)
             target_sheet.set_print_grid(page.print_gridlines)
             target_sheet.set_print_headers(page.print_headings)
+            if worksheet.horizontal_page_breaks:
+                target_sheet.set_horz_page_breaks(
+                    [(row, 0, 255) for row in worksheet.horizontal_page_breaks]
+                )
             if page.scale is not None:
                 target_sheet.set_print_scaling(page.scale)
             else:

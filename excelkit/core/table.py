@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
+
+
+class TotalFunction:
+    """Excel 数据表汇总行函数常量。
+
+    使用方法：``table.set_total('金额', TotalFunction.SUM)``。
+    参数：本类只提供固定字符串常量，不需要实例化。
+    返回：无。
+    """
+
+    SUM = "sum"
+    AVERAGE = "average"
+    COUNT = "count"
+    COUNT_NUMS = "countNums"
+    MIN = "min"
+    MAX = "max"
+
+
+_TOTAL_FUNCTIONS = {
+    TotalFunction.SUM, TotalFunction.AVERAGE, TotalFunction.COUNT,
+    TotalFunction.COUNT_NUMS, TotalFunction.MIN, TotalFunction.MAX,
+}
 
 if TYPE_CHECKING:
     from .range import Range
@@ -15,6 +38,7 @@ class Table:
     __slots__ = (
         "_worksheet", "_name", "_bounds", "_style", "_has_header",
         "_show_row_stripes", "_show_column_stripes", "_show_totals", "_totals",
+        "_data_max_row",
     )
 
     def __init__(
@@ -38,6 +62,7 @@ class Table:
         self._worksheet = worksheet
         self._name = name
         self._bounds = (area.min_row, area.min_column, area.max_row, area.max_column)
+        self._data_max_row = area.max_row
         self.style = style
         self.has_header = has_header
         self.show_row_stripes = show_row_stripes
@@ -195,9 +220,30 @@ class Table:
 
     @show_totals.setter
     def show_totals(self, value: bool) -> None:
-        """功能：设置是否显示数据表汇总行。参数 ``value`` 必须为布尔值。"""
+        """功能：设置是否显示数据表汇总行并维护 Table 的物理区域边界。
+
+        使用方法：``table.show_totals = True``。
+        参数：``value`` 必须是布尔值；启用时会占用数据末行下一行作为汇总行。
+        返回：``None``。
+        异常：汇总行位置已经含有值或公式时抛出 ``ValueError``。
+        """
         if not isinstance(value, bool):
             raise TypeError("show_totals 必须是布尔值")
+        if value == self._show_totals:
+            return
+        min_row, min_column, max_row, max_column = self._bounds
+        if value:
+            total_row = self._data_max_row + 1
+            for column in range(min_column, max_column + 1):
+                if (
+                    self._worksheet._values.get(total_row, column) is not None
+                    or (total_row, column) in self._worksheet._formulas
+                ):
+                    raise ValueError("数据表下一行已有内容，不能作为汇总行")
+            self._bounds = (min_row, min_column, total_row, max_column)
+            self._worksheet._touch(total_row, max_column)
+        else:
+            self._bounds = (min_row, min_column, self._data_max_row, max_column)
         self._show_totals = value
 
     @property
@@ -208,6 +254,43 @@ class Table:
         ``count``、``min``、``max``。返回可直接修改的字典。
         """
         return self._totals
+
+    @property
+    def records(self) -> list[dict[str, Any]]:
+        """功能：把表头以下的数据读取为按列名组织的字典列表。
+
+        使用方法：``records = table.records``。
+        参数：无；当表格没有表头时，自动使用 ``Column1``、``Column2`` 等字段名。
+        返回：按当前行顺序排列的 ``list[dict]``，空单元格对应 ``None``。
+        """
+        names = self.columns
+        first = self._bounds[0] + int(self.has_header)
+        return [
+            {
+                name: self._worksheet._values.get(row, column)
+                for name, column in zip(names, range(self._bounds[1], self._bounds[3] + 1))
+            }
+            for row in range(first, self._data_max_row + 1)
+        ]
+
+    def set_total(self, column: str, function: str) -> "Table":
+        """功能：为指定表头列设置 Excel 汇总行函数并显示汇总行。
+
+        使用方法：``table.set_total('金额', TotalFunction.SUM)``。
+        参数：``column`` 为表格中的精确列名；``function`` 为 ``TotalFunction``
+        常量之一。
+        返回：当前表格，支持链式调用。
+        异常：列名或函数不受支持时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(column, str):
+            raise TypeError("column 必须是字符串表头")
+        if column not in self.columns:
+            raise ValueError(f"数据表不存在列：{column!r}")
+        if function not in _TOTAL_FUNCTIONS:
+            raise ValueError("function 必须是 TotalFunction 的固定值")
+        self._totals[column] = function
+        self.show_totals = True
+        return self
 
     def resize(self, address: str) -> "Table":
         """功能：把数据表调整为同一工作表上的新矩形区域。
@@ -222,6 +305,12 @@ class Table:
             if not (area.max_row < other.range.min_row or area.min_row > other.range.max_row
                     or area.max_column < other.range.min_column or area.min_column > other.range.max_column):
                 raise ValueError("数据表区域不能与其他数据表重叠")
+        if self._show_totals:
+            if area.max_row <= area.min_row:
+                raise ValueError("显示汇总行的数据表必须至少包含表头和汇总行")
+            self._data_max_row = area.max_row - 1
+        else:
+            self._data_max_row = area.max_row
         self._bounds = (area.min_row, area.min_column, area.max_row, area.max_column)
         return self
 
@@ -236,10 +325,20 @@ class Table:
         width = self._bounds[3] - self._bounds[1] + 1
         if len(values) != width:
             raise ValueError(f"追加数据需要 {width} 个值")
-        row = self._bounds[2] + 1
+        row = self._data_max_row + 1
+        if self._show_totals:
+            next_total_row = row + 1
+            for column in range(self._bounds[1], self._bounds[3] + 1):
+                if (
+                    self._worksheet._values.get(next_total_row, column) is not None
+                    or (next_total_row, column) in self._worksheet._formulas
+                ):
+                    raise ValueError("数据表汇总行下一行已有内容，不能追加记录")
         for offset, value in enumerate(values):
             self._worksheet.cell(row, self._bounds[1] + offset).value = value
-        self._bounds = (self._bounds[0], self._bounds[1], row, self._bounds[3])
+        self._data_max_row = row
+        final_row = row + int(self._show_totals)
+        self._bounds = (self._bounds[0], self._bounds[1], final_row, self._bounds[3])
         return self
 
     def append_rows(self, rows: Any) -> "Table":
@@ -253,10 +352,36 @@ class Table:
             self.append(row)
         return self
 
+    def append_records(self, records: Iterable[Mapping[str, Any]]) -> "Table":
+        """功能：按表头名称批量追加字典记录。
+
+        使用方法：``table.append_records([{'姓名': '张三', '成绩': 95}])``。
+        参数：``records`` 为映射对象的可迭代序列；键必须属于数据表表头，缺少的列
+        自动写入 ``None``。
+        返回：当前表格。
+        异常：记录不是映射、包含未知列或不可迭代时抛出 ``TypeError`` 或
+        ``ValueError``。
+        """
+        try:
+            prepared = list(records)
+        except TypeError as error:
+            raise TypeError("records 必须是映射记录的可迭代对象") from error
+        names = self.columns
+        permitted = set(names)
+        for record in prepared:
+            if not isinstance(record, Mapping):
+                raise TypeError("records 中的每条记录必须是映射对象")
+            unknown = set(record) - permitted
+            if unknown:
+                raise ValueError(f"记录包含数据表中不存在的列：{sorted(unknown)!r}")
+        for record in prepared:
+            self.append([record.get(name) for name in names])
+        return self
+
     def clear_data(self) -> "Table":
         """功能：清除数据表中除表头外的所有单元格，并保持表格区域。返回当前表格。"""
         first = self._bounds[0] + (1 if self.has_header else 0)
-        for row in range(first, self._bounds[2] + 1):
+        for row in range(first, self._data_max_row + 1):
             for column in range(self._bounds[1], self._bounds[3] + 1):
                 self._worksheet.cell(row, column).value = None
         return self
@@ -271,4 +396,4 @@ class Table:
         return f"<Table {self._name!r} {self._worksheet.name}!{self.range.address}>"
 
 
-__all__ = ["Table"]
+__all__ = ["Table", "TotalFunction"]
