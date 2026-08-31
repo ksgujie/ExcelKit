@@ -215,7 +215,12 @@ class Table:
 
     @property
     def show_totals(self) -> bool:
-        """功能：读取是否显示数据表汇总行。使用方法：``table.show_totals``。"""
+        """功能：读取是否显示数据表汇总行。
+
+        使用方法：``enabled = table.show_totals``。
+        参数：无，只读时不需要参数；设置使用同名属性设置器。
+        返回：显示汇总行时返回 ``True``，否则返回 ``False``。
+        """
         return self._show_totals
 
     @show_totals.setter
@@ -256,23 +261,26 @@ class Table:
         """
         return dict(self._totals)
 
-    @property
-    def records(self) -> list[dict[str, Any]]:
+    def to_records(self) -> list[dict[str, Any]]:
         """功能：把表头以下的数据读取为按列名组织的字典列表。
 
-        使用方法：``records = table.records``。
+        使用方法：``records = table.to_records()``。
         参数：无；当表格没有表头时，自动使用 ``Column1``、``Column2`` 等字段名。
         返回：按当前行顺序排列的 ``list[dict]``，空单元格对应 ``None``。
         """
-        names = self.columns
         first = self._bounds[0] + int(self.has_header)
-        return [
-            {
-                name: self._worksheet._values.get(row, column)
-                for name, column in zip(names, range(self._bounds[1], self._bounds[3] + 1))
-            }
-            for row in range(first, self._data_max_row + 1)
-        ]
+        if first > self._data_max_row:
+            return []
+        from .range import Range
+
+        area = Range(
+            self._worksheet,
+            first,
+            self._bounds[1],
+            self._data_max_row,
+            self._bounds[3],
+        )
+        return area.to_records(headers=self.columns)
 
     def set_total(self, column: str, function: str) -> "Table":
         """功能：为指定表头列设置 Excel 汇总行函数并显示汇总行。
@@ -343,8 +351,13 @@ class Table:
         return self
 
     def append_rows(self, rows: Any) -> "Table":
-        """功能：批量追加多行数据。参数 ``rows`` 为可迭代的等长行序列；验证完毕后
-        写入并返回当前表格，空序列不改变区域。"""
+        """功能：批量追加多行数据。
+
+        使用方法：``table.append_rows([["张三", 95], ["李四", 92]])``。
+        参数：``rows`` 为可迭代的等长行序列，每行列数必须等于数据表列数。
+        返回：当前 :class:`Table`；空序列不改变区域。
+        异常：任意行的类型或列数无效时抛出 ``ValueError``。
+        """
         prepared = list(rows)
         width = self._bounds[3] - self._bounds[1] + 1
         if any(not isinstance(row, (list, tuple)) or len(row) != width for row in prepared):
@@ -380,7 +393,12 @@ class Table:
         return self
 
     def clear_data(self) -> "Table":
-        """功能：清除数据表中除表头外的所有单元格，并保持表格区域。返回当前表格。"""
+        """功能：清除数据表中除表头外的所有数据单元格，并保持表格区域。
+
+        使用方法：``table.clear_data()``。
+        参数：无；表头、Table 定义、样式选项和汇总配置保持不变。
+        返回：当前 :class:`Table`，支持链式调用。
+        """
         first = self._bounds[0] + (1 if self.has_header else 0)
         for row in range(first, self._data_max_row + 1):
             for column in range(self._bounds[1], self._bounds[3] + 1):

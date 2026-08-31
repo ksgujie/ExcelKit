@@ -22,6 +22,10 @@ table = worksheet.write_table(
     0, 0, orders, name="Orders", freeze_header=True, auto_fit=True
 )
 
+# Range 与 Table 使用同名方法转回字典记录；转换不会修改工作簿。
+assert worksheet.range("A1:D4").to_records() == orders
+assert table.to_records() == orders
+
 # 先写入首格公式，再使用唯一的自动填充接口向下扩展相对引用。
 worksheet["E2"].formula = "=C2*D2"
 worksheet.range("E2:E2").auto_fill("E2:E4")

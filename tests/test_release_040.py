@@ -31,31 +31,30 @@ class FormulaCalculationTests(unittest.TestCase):
         result["A4"].formula = '=CONCAT("")'
 
         self.assertIs(workbook.calculate(), workbook)
-        self.assertEqual(result["A1"].cached_value, 10)
-        self.assertEqual(result["A2"].cached_value, 20)
-        self.assertEqual(result["A3"].cached_value, "合计:20")
+        self.assertEqual(result["A1"].value, 10)
+        self.assertEqual(result["A2"].value, 20)
+        self.assertEqual(result["A3"].value, "合计:20")
         self.assertEqual(result["A3"].formula_status, "calculated")
         self.assertEqual(result["A3"].read().as_string(), "合计:20")
-        self.assertIsNone(result["A3"].value)
-        self.assertEqual(result["A4"].cached_value, "")
+        self.assertEqual(result["A4"].value, "")
         self.assertEqual(result["A4"].formula_status, "calculated")
 
         source["A1"] = 10
         self.assertEqual(result["A1"].formula_status, "pending")
-        self.assertIsNone(result["A1"].cached_value)
+        self.assertIsNone(result["A1"].value)
         workbook.calculate()
-        self.assertEqual(result["A1"].cached_value, 19)
+        self.assertEqual(result["A1"].value, 19)
 
-        before = result["A1"].cached_value
+        before = result["A1"].value
         with self.assertRaises(TypeError):
             result["B1"].formula = "="
-        self.assertEqual(result["A1"].cached_value, before)
+        self.assertEqual(result["A1"].value, before)
 
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "formula.xlsx"
             workbook.save(filename)
             loaded = Workbook.load(filename)
-            self.assertEqual(loaded.sheet("结果")["A4"].cached_value, "")
+            self.assertEqual(loaded.sheet("结果")["A4"].value, "")
             self.assertEqual(
                 loaded.sheet("结果")["A4"].formula_status, "calculated"
             )

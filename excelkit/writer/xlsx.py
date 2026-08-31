@@ -591,7 +591,12 @@ def vml_comments_xml(notes: Sequence[tuple[str, object]]) -> bytes:
 
 
 def _chart_reference(worksheet: "Worksheet", address: str) -> str:
-    """功能：把图表区域地址转换为带工作表名称的绝对公式引用。"""
+    """功能：把图表区域地址转换为带工作表名称的绝对公式引用。
+
+    使用方法：由 :func:`chart_xml` 生成系列分类和值引用时内部调用。
+    参数：``worksheet`` 为区域所属工作表；``address`` 为已登记的 A1 区域地址。
+    返回：形如 ``''销售''!$A$1:$A$10`` 的绝对引用字符串。
+    """
     area = worksheet.range(address)
     name = worksheet.name.replace("'", "''")
     return (
@@ -736,7 +741,12 @@ def drawing_xml(
 def drawing_rels_xml(
     images: Sequence[tuple[int, object]], charts: Sequence[tuple[int, object]]
 ) -> bytes:
-    """功能：生成 DrawingML 到图片和图表部件的关系清单。"""
+    """功能：生成 DrawingML 到图片和图表部件的关系清单。
+
+    使用方法：XLSX 打包器为含图片或图表的每张工作表内部调用。
+    参数：``images``、``charts`` 分别为部件编号与对象组成的序列。
+    返回：可写入对应 ``drawingN.xml.rels`` 的 UTF-8 XML 字节串。
+    """
     root = ET.Element(_qname(_PACKAGE_REL_NS, "Relationships"))
     relationship_id = 1
     for image_id, image in images:

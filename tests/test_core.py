@@ -373,8 +373,8 @@ class WorksheetTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             snapshot.value = "9"
 
-    def test_formula_cached_value_is_read_only_and_invalidated_on_change(self):
-        """功能：验证公式缓存结果可只读转换且修改公式会使旧缓存失效。
+    def test_formula_value_is_read_only_result_and_invalidated_on_change(self):
+        """功能：验证公式结果可统一读取且修改公式会使旧结果失效。
 
         使用方法：由 unittest 自动发现执行。
         参数：无。
@@ -383,15 +383,15 @@ class WorksheetTests(unittest.TestCase):
         cell = self.worksheet["C3"]
         cell.formula = "=SUM(B3:B3)"
         self.worksheet._set_cached_value(2, 2, 95)
-        self.assertEqual(cell.cached_value, 95)
+        self.assertEqual(cell.value, 95)
         self.assertEqual(cell.read().as_string(), "95")
-        self.assertIsNone(cell.value)
+        self.assertFalse(hasattr(cell, "cached_value"))
         with self.assertRaises(ValueError):
             cell.as_string()
         self.assertEqual(cell.formula, "=SUM(B3:B3)")
 
         cell.formula = "=SUM(B3:B3)*2"
-        self.assertIsNone(cell.cached_value)
+        self.assertIsNone(cell.value)
         self.assertEqual(cell.formula, "=SUM(B3:B3)*2")
 
     def test_worksheet_values_and_cell_style(self):

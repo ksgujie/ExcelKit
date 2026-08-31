@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 class CellValue:
     """表示一次 ``Cell.read()`` 获得的不可变值快照。
 
-    普通单元格快照保存 ``Cell.value``；公式单元格快照优先保存 Excel/WPS
-    最近一次写入文件的缓存计算结果。快照转换始终只影响 Python 返回值，不会写回工作簿。
+    普通单元格和公式单元格都快照保存读取瞬间的 ``Cell.value``。快照转换始终只影响
+    Python 返回值，不会写回工作簿。
     """
 
     __slots__ = ("_value",)
@@ -35,18 +35,19 @@ class CellValue:
         """功能：创建不会写回工作表的单元格值快照。
 
         使用方法：由 ``cell.read()`` 创建，通常不直接实例化。
-        参数：``value`` 为读取瞬间的普通值或公式缓存结果。
+        参数：``value`` 为读取瞬间的单元格有效值。
         返回：无。
         """
         self._value = value
 
     @property
     def value(self) -> Any:
-        """功能：取得创建快照时读取到的原始普通值。
+        """功能：取得创建快照时读取到的原始有效值。
 
         使用方法：``raw_value = cell.read().value``。
         参数：无；本属性只读，不会把任何内容写回原单元格。
-        返回：快照保存的原始 Python 值；空单元格或没有缓存结果的公式单元格返回 ``None``。
+        返回：快照保存的原始 Python 值；空单元格或没有有效结果的公式单元格返回
+        ``None``。
         """
         return self._value
 
@@ -179,12 +180,15 @@ class Cell:
 
     @property
     def value(self) -> Any:
-        """功能：读取单元格的普通值。
+        """功能：读取单元格当前可以取得的有效值。
 
         使用方法：``value = worksheet["A1"].value``。
         参数：无。
-        返回：已保存的普通值；空单元格或公式单元格返回 ``None``。
+        返回：普通单元格返回已保存值；公式单元格返回最近一次有效计算结果；空单元格、
+        尚未计算或缓存已失效的公式返回 ``None``。读取不会自动计算公式。
         """
+        if self.formula is not None:
+            return self._worksheet._get_cached_value(self._row, self._column)
         return self._worksheet._values.get(self._row, self._column)
 
     @property
@@ -231,17 +235,6 @@ class Cell:
         异常：类型、内容或合并区域位置无效时抛出 ``TypeError`` 或 ``ValueError``。
         """
         self._worksheet._set_note(self._row, self._column, value)
-
-    @property
-    def cached_value(self) -> Any:
-        """功能：读取公式最近一次由表格软件或工作簿计算器生成的缓存结果。
-
-        使用方法：``result = worksheet["C3"].cached_value``。
-        参数：无；本属性只读，不会触发公式计算。
-        返回：公式缓存的 Python 值；普通单元格、未计算公式或已失效缓存返回
-        ``None``。缓存值可能因源数据变化而过期，不能替代表格软件重新计算。
-        """
-        return self._worksheet._get_cached_value(self._row, self._column)
 
     @property
     def formula_status(self) -> str:
@@ -333,12 +326,11 @@ class Cell:
 
         使用方法：``number = cell.read().as_int()``；与直接 ``cell.as_int()``
         不同，转换结果不会修改工作表，也不会影响之后的文件保存内容。公式单元格
-        优先读取 Excel/WPS 保存的 ``cached_value``，没有缓存时读取到 ``None``。
+        读取与 :attr:`value` 相同的当前公式结果，没有有效结果时读取到 ``None``。
         参数：无。
-        返回：包含读取瞬间普通值或公式缓存结果的 :class:`CellValue`。
+        返回：包含读取瞬间有效值的 :class:`CellValue`。
         """
-        value = self.cached_value if self.formula is not None else self.value
-        return CellValue(value)
+        return CellValue(self.value)
 
     def _ensure_no_formula(self) -> None:
         """功能：阻止写回型类型转换覆盖公式单元格。
@@ -496,10 +488,10 @@ class Cell:
 
         使用方法：``repr(cell)``。
         参数：无。
-        返回：包含工作表名、A1 地址、普通值、缓存结果和公式的字符串。
+        返回：包含工作表名、A1 地址、当前有效值和公式的字符串。
         """
         return (
             f"<Cell {self._worksheet.name}!{self.address} "
-            f"value={self.value!r} cached_value={self.cached_value!r} "
+            f"value={self.value!r} "
             f"formula={self.formula!r}>"
         )

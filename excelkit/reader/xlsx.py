@@ -84,7 +84,12 @@ def _load_core_properties(
     root = _read_xml(package, member)
 
     def text(namespace: str, name: str) -> str:
-        """功能：读取核心属性元素文本，不存在时返回空字符串。"""
+        """功能：读取一个核心属性 XML 元素的文本。
+
+        使用方法：由外层核心属性读取流程按字段内部调用。
+        参数：``namespace`` 为元素命名空间；``name`` 为不带命名空间的元素名。
+        返回：元素文本字符串；元素不存在或没有文本时返回空字符串。
+        """
         element = root.find(_tag(namespace, name))
         return "" if element is None else (element.text or "")
 

@@ -109,8 +109,7 @@ class XlsxWriterTests(unittest.TestCase):
             loaded = Workbook.load(filename)
             loaded_cell = loaded.active["C3"]
             self.assertEqual(loaded_cell.formula, "=SUM(B3:B3)")
-            self.assertIsNone(loaded_cell.value)
-            self.assertEqual(loaded_cell.cached_value, 95)
+            self.assertEqual(loaded_cell.value, 95)
             self.assertEqual(loaded_cell.read().as_int(), 95)
 
     def test_multiple_sheets_use_zero_based_iteration_internally(self):

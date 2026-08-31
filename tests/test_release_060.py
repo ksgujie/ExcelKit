@@ -40,17 +40,17 @@ class FormulaAndDataOperationTests(unittest.TestCase):
 
         workbook.calculate(strict=True)
 
-        self.assertEqual(worksheet["C1"].cached_value, 30)
-        self.assertEqual(worksheet["C2"].cached_value, 20)
-        self.assertEqual(worksheet["C3"].cached_value, 99)
-        self.assertEqual(worksheet["C4"].cached_value, 20)
-        self.assertEqual(worksheet["C5"].cached_value, 10)
-        self.assertEqual(worksheet["C6"].cached_value, 2026)
-        self.assertEqual(worksheet["C7"].cached_value, 1.3)
-        self.assertEqual(worksheet["C8"].cached_value, 1.2)
-        self.assertEqual(worksheet["C9"].cached_value, 20)
-        self.assertEqual(worksheet["C10"].cached_value, 1)
-        self.assertEqual(worksheet["C11"].cached_value, 20)
+        self.assertEqual(worksheet["C1"].value, 30)
+        self.assertEqual(worksheet["C2"].value, 20)
+        self.assertEqual(worksheet["C3"].value, 99)
+        self.assertEqual(worksheet["C4"].value, 20)
+        self.assertEqual(worksheet["C5"].value, 10)
+        self.assertEqual(worksheet["C6"].value, 2026)
+        self.assertEqual(worksheet["C7"].value, 1.3)
+        self.assertEqual(worksheet["C8"].value, 1.2)
+        self.assertEqual(worksheet["C9"].value, 20)
+        self.assertEqual(worksheet["C10"].value, 1)
+        self.assertEqual(worksheet["C11"].value, 20)
 
     def test_sort_filter_visibility_and_note(self) -> None:
         """功能：验证排序会移动数据、筛选会隐藏行、可见性和批注可读写。"""

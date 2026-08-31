@@ -132,7 +132,12 @@ class StyleRegistry:
         return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
     def _append_dxfs(self, root: ET.Element) -> None:
-        """功能：写出条件格式使用的差异样式；参数为样式表根元素；返回 None。"""
+        """功能：写出条件格式使用的差异样式集合。
+
+        使用方法：由 :meth:`xml` 在生成完整样式表时内部调用。
+        参数：``root`` 为 ``styleSheet`` 根元素。
+        返回：``None``；没有差异样式时不生成 ``dxfs`` 元素。
+        """
         if not self.dxfs:
             return
         element = ET.SubElement(root, _tag("dxfs"), {"count": str(len(self.dxfs))})

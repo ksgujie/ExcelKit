@@ -465,8 +465,12 @@ class Worksheet:
 
     @property
     def protection(self) -> Protection:
-        """功能：取得工作表保护设置对象。使用方法：``ws.protection.enabled = True``。
-        返回同一个可修改对象；保存 XLSX 时写入 sheetProtection。"""
+        """功能：取得工作表保护设置对象。
+
+        使用方法：``worksheet.protection.enabled = True``。
+        参数：无，只读属性；返回对象的字段可以直接修改。
+        返回：同一个可修改 :class:`Protection`；保存 XLSX 时写入工作表保护定义。
+        """
         return self._protection
 
     def add_validation(self, address: str, *, kind: str = "list", values=None,
@@ -492,11 +496,22 @@ class Worksheet:
 
     @property
     def validations(self) -> tuple[Validation, ...]:
-        """功能：取得当前工作表全部数据有效性规则的只读快照。"""
+        """功能：取得当前工作表全部数据有效性规则的只读快照。
+
+        使用方法：``for rule in worksheet.validations: ...``。
+        参数：无，只读属性。
+        返回：按添加顺序排列的 ``tuple[Validation, ...]``。
+        """
         return tuple(self._validations)
 
     def remove_validation(self, validation: Validation) -> "Worksheet":
-        """功能：删除当前工作表中的数据有效性规则。参数必须是本表规则；返回当前表。"""
+        """功能：删除当前工作表中的数据有效性规则。
+
+        使用方法：``worksheet.remove_validation(validation)``。
+        参数：``validation`` 必须是当前工作表已经登记的 :class:`Validation`。
+        返回：当前 :class:`Worksheet`，支持链式调用。
+        异常：规则不属于当前工作表时抛出 ``ValueError``。
+        """
         if validation not in self._validations:
             raise ValueError("数据有效性规则不属于当前工作表")
         self._validations.remove(validation)
@@ -585,11 +600,22 @@ class Worksheet:
 
     @property
     def conditional_formats(self) -> tuple[ConditionalFormat, ...]:
-        """功能：取得工作表全部条件格式规则的只读快照。"""
+        """功能：取得工作表全部条件格式规则的只读快照。
+
+        使用方法：``for rule in worksheet.conditional_formats: ...``。
+        参数：无，只读属性。
+        返回：按添加顺序排列的 ``tuple[ConditionalFormat, ...]``。
+        """
         return tuple(self._conditionals)
 
     def remove_conditional_format(self, item: ConditionalFormat) -> "Worksheet":
-        """功能：删除条件格式规则；参数必须来自当前工作表；返回当前工作表。"""
+        """功能：删除当前工作表中的一条条件格式规则。
+
+        使用方法：``worksheet.remove_conditional_format(rule)``。
+        参数：``item`` 必须是当前工作表已经登记的 :class:`ConditionalFormat`。
+        返回：当前 :class:`Worksheet`，支持链式调用。
+        异常：规则不属于当前工作表时抛出 ``ValueError``。
+        """
         if item not in self._conditionals:
             raise ValueError("条件格式规则不属于当前工作表")
         self._conditionals.remove(item)
@@ -1018,18 +1044,76 @@ class Worksheet:
 
     @property
     def values(self) -> list[list[Any]]:
-        """功能：读取工作表当前已经触及范围内的全部普通值。
+        """功能：读取工作表当前已经触及范围内的全部有效值。
 
         使用方法：``data = worksheet.values``。
         参数：无，只读属性；需要写入数据时使用单元格、``append``、
         ``append_rows`` 或 ``Range.set_values``。
         返回：从 A1 到 ``max_row``、``max_column`` 的二维列表；空工作表返回
-        ``[]``。公式单元格没有普通值，因此对应位置返回 ``None``。
+        ``[]``。公式单元格返回当前公式结果；没有有效结果时返回 ``None``。
         """
         if self._max_row < 0:
             return []
         end_address = cell_address(self._max_row, self._max_column)
         return self.range(f"A1:{end_address}").values
+
+    def to_records(self, *, header_row: int = 0) -> list[dict[str, Any]]:
+        """功能：把单一主数据表工作表转换为字典记录列表。
+
+        使用方法：字段位于 Excel 第2行时调用 ``worksheet.to_records(header_row=1)``。
+        参数：``header_row`` 为字段所在的绝对 0-based 行索引，默认 ``0``；字段行
+        上方内容忽略，字段行首尾非空字段之间确定数据列。
+        返回：字段行下方到工作表末行的记录列表；完全空白行会跳过，没有数据时返回
+        ``[]``。普通值和公式结果均通过 ``Cell.value`` 统一读取。
+        异常：工作表为空、字段行不存在、字段不连续、为空、重复或类型无效时抛出
+        ``TypeError``、``ValueError`` 或 ``InvalidAddressError``。
+        """
+        validate_row_index(header_row)
+        if self._max_row < header_row or self._max_column < 0:
+            raise ValueError("工作表中不存在指定字段行")
+        header_values = [
+            self.cell(header_row, column).value
+            for column in range(self._max_column + 1)
+        ]
+        populated = [
+            index for index, value in enumerate(header_values)
+            if value not in (None, "")
+        ]
+        if not populated:
+            raise ValueError("字段行中没有字段名")
+        first_column, last_column = populated[0], populated[-1]
+        names = header_values[first_column:last_column + 1]
+        if any(value in (None, "") for value in names):
+            raise ValueError("字段行的首尾字段之间不能存在空字段")
+        header_area = Range(
+            self,
+            header_row,
+            first_column,
+            header_row,
+            last_column,
+        )
+        # 先统一验证字段名，再处理没有数据行的工作表。
+        header_area.to_records()
+        if self._max_row == header_row:
+            return []
+        area = Range(
+            self,
+            header_row + 1,
+            first_column,
+            self._max_row,
+            last_column,
+        )
+        records = area.to_records(headers=names)
+        result: list[dict[str, Any]] = []
+        for offset, record in enumerate(records):
+            row = header_row + 1 + offset
+            has_formula = any(
+                (row, column) in self._formulas
+                for column in range(first_column, last_column + 1)
+            )
+            if has_formula or any(value not in (None, "") for value in record.values()):
+                result.append(record)
+        return result
 
     @staticmethod
     def _prepare_records(
@@ -1114,7 +1198,12 @@ class Worksheet:
         return area
 
     def _next_table_name(self) -> str:
-        """功能：生成当前工作簿中尚未使用的默认数据表名称。"""
+        """功能：生成当前工作簿中尚未使用的默认数据表名称。
+
+        使用方法：由 :meth:`write_table` 在调用者省略名称时内部调用。
+        参数：无；检查当前工作簿全部工作表中的 Table 名称。
+        返回：形如 ``Table1``、``Table2`` 的唯一名称字符串。
+        """
         index = 1
         while self._workbook._table(f"Table{index}") is not None:
             index += 1
@@ -1156,35 +1245,14 @@ class Worksheet:
             self.auto_fit_columns(area.min_column, area.max_column)
         return table
 
-    def read_records(self, address: str, *, headers: bool = True) -> list[dict[str, Any]]:
-        """功能：把一个连续区域读取为按首行字段组织的字典记录。
-
-        使用方法：``orders = ws.read_records('A1:C100')``。
-        参数：``address`` 为 A1 区域；``headers`` 为真时首行作字段名且不返回，
-        为假时自动使用 ``Column1``、``Column2`` 等字段名并返回全部行。
-        返回：按区域行顺序组成的字典列表。
-        异常：区域为空、字段名为空或重复、``headers`` 类型无效时抛出 ``ValueError``
-        或 ``TypeError``。
-        """
-        if not isinstance(headers, bool):
-            raise TypeError("headers 必须是 bool")
-        area = self.range(address)
-        values = area.values
-        if headers:
-            header_values = values[0]
-            if any(not isinstance(value, str) or not value for value in header_values):
-                raise ValueError("表头必须全部是非空字符串")
-            names = tuple(header_values)
-            if len(set(names)) != len(names):
-                raise ValueError("表头不能重复")
-            values = values[1:]
-        else:
-            names = tuple(f"Column{index}" for index in range(1, len(values[0]) + 1))
-        return [dict(zip(names, row_values)) for row_values in values]
-
     @staticmethod
     def _display_width(value: Any) -> int:
-        """功能：按中日韩全角字符宽度估算单元格显示宽度。"""
+        """功能：按中日韩全角字符宽度估算单元格显示宽度。
+
+        使用方法：由自动列宽和自动行高计算内部调用。
+        参数：``value`` 为要估算显示宽度的任意单元格内容。
+        返回：多行内容中最宽一行的近似字符宽度整数。
+        """
         text = str(value)
         return max(
             sum(2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1 for char in line)
@@ -1263,7 +1331,12 @@ class Worksheet:
 
     @property
     def horizontal_page_breaks(self) -> tuple[int, ...]:
-        """功能：取得全部手动水平分页符所在的 0-based 行索引快照。"""
+        """功能：取得全部手动水平分页符所在的 0-based 行索引快照。
+
+        使用方法：``breaks = worksheet.horizontal_page_breaks``。
+        参数：无，只读属性；增删使用对应方法。
+        返回：按升序排列的 0-based 行索引元组。
+        """
         return tuple(sorted(self._horizontal_page_breaks))
 
     def add_horizontal_page_break(self, row: int) -> "Worksheet":
@@ -1926,11 +1999,11 @@ class Worksheet:
         self._formula_errors.pop((row, column), None)
 
     def _get_cached_value(self, row: int, column: int) -> Any:
-        """功能：读取公式最近一次由外部表格软件保存的缓存结果。
+        """功能：读取公式最近一次有效计算结果的内部缓存。
 
-        使用方法：由 :attr:`Cell.cached_value` 和 :meth:`Cell.read` 内部调用。
+        使用方法：由 :attr:`Cell.value` 内部调用，业务代码不应直接调用。
         参数：``row``、``column`` 为 0-based 整数索引，顺序为先行后列。
-        返回：公式缓存的 Python 值；没有公式或文件没有缓存结果时返回 ``None``。
+        返回：公式结果的 Python 值；没有公式或没有有效结果时返回 ``None``。
         异常：索引无效时抛出 ``InvalidAddressError``。
         """
         validate_row_index(row)
@@ -1946,7 +2019,7 @@ class Worksheet:
         缓存容器，业务代码不应调用本方法。
         参数：``row``、``column`` 为 0-based 整数索引；``value`` 为 XML ``v``
         元素解析出的 Python 值，``None`` 表示没有缓存结果。
-        返回：``None``；不会把缓存结果伪装成普通 ``Cell.value``。
+        返回：``None``；结果保存在公式专用内部容器中，不会覆盖公式。
         异常：索引无效或目标位置没有公式时抛出 ``InvalidAddressError`` 或
         ``ValueError``。
         """

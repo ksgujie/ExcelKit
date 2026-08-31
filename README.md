@@ -1,14 +1,14 @@
-# ExcelKit 0.8.1
+# ExcelKit 0.8.2
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.8.1 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.8.2 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.8.1-py3-none-any.whl
+pip install excelkit-0.8.2-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -117,11 +117,10 @@ assert worksheet.color == "FF4472C4"
 - `row`、`column`：分别返回 0-based 行索引和列索引。
 - `index`：以只读 `(row, column)` 元组一次返回 0-based 行列索引。
 - `address`：对应的规范化 A1 地址。
-- `value`：普通值；写入普通值会清除同位置的公式。
+- `value`：普通单元格返回已保存值，公式单元格返回当前有效计算结果；写入会清除
+  同位置的公式。
 - `formula`：公式；可包含或省略 `=`，读取时始终带 `=`；赋值 `None` 清除公式。
 - `style`：完整不可变样式，支持字体、填充、边框、对齐和数字格式。
-- `cached_value`：公式最近一次由 Excel/WPS 保存的缓存结果，只读；普通单元格和
-  尚未计算的公式返回 `None`；也可由 `Workbook.calculate()` 更新。
 - `formula_status`：返回 `empty`、`pending`、`calculated` 或 `error`。
 - `calculation_error`：返回最近一次 Python 公式计算错误说明。
 - `copy_style(source)`：从另一个 Cell 复制完整样式，不复制值和公式。
@@ -130,14 +129,14 @@ assert worksheet.color == "FF4472C4"
   `as_datetime()`：转换、写回并直接返回目标类型。
 - `read()`：取得只读值快照，可读取 `.value` 或使用同一组 `as_*()` 而不写回。
 
-`cell.value` 始终只表示普通值，公式结果不会伪装成普通值；读取公式结果使用
-`cell.cached_value` 或 `cell.read()`。修改任意输入值或公式会使工作簿内全部派生
-缓存失效，随后可重新调用 `workbook.calculate()` 或交给 Excel/WPS 重新计算。
+`cell.value` 是统一读取入口，不需要先判断单元格是否含公式。公式不会在读取时自动
+计算：结果可来自 Excel/WPS 已保存结果或 `workbook.calculate()`；尚无有效结果时为
+`None`。修改任意输入值或公式会使工作簿内全部派生结果失效，随后可重新计算。
 
 ### Range
 
 - `min_row`、`min_column`、`max_row`、`max_column`：0-based 边界索引。
-- `values`：以二维 list 读取普通值；公式单元格显示为 `None`。
+- `values`：以二维 list 读取有效值；公式单元格显示当前结果，没有有效结果时为 `None`。
 - `set_values(values)`：写入等形状二维数据并返回当前区域；普通值会覆盖原公式。
 - `address`：规范化 A1 区域地址。
 - `clear(values=..., styles=..., hyperlinks=..., notes=...)`：通过一个入口按需清除区域内容和附属信息。
@@ -274,10 +273,9 @@ worksheet["A2"] = 20
 worksheet["A3"].formula = "=SUM(A1:A2)"
 
 workbook.calculate()
-assert worksheet["A3"].cached_value == 30
+assert worksheet["A3"].value == 30
 assert worksheet["A3"].formula_status == "calculated"
 assert worksheet["A3"].read().as_int() == 30
-assert worksheet["A3"].value is None
 ```
 
 当前计算器支持 `+ - * / // % ^`、比较、括号、单格与区域引用、跨表引用，以及
@@ -442,7 +440,7 @@ XlsxWriter(workbook).write("demo.xlsx")
 图片、批注、排序、筛选和可见性；[18_business_report.py](examples/18_business_report.py)
 演示字典记录、业务 Table、批量公式、自动填充、条件格式、汇总和打印分页。
 
-## 0.8.1 业务报表快捷接口
+## 0.8.2 业务报表快捷接口
 
 ```python
 from excelkit import Workbook
@@ -466,11 +464,24 @@ ws.group_rows(1, 9, collapsed=True)
 ws.group_columns(1, 3)
 ```
 
-`write_records()` / `read_records()` 用于字典列表与 Excel 区域之间的双向转换；
-`export_pages()` 可将大批量记录拆为多张工作表；`render_many()` 可按同一模板一次生成多份
-工作表。完整参数和示例见中文 API 手册。
+`write_records()` 用于把字典列表写入 Excel；区域和 Table 统一通过 `to_records()`
+转回字典列表：
 
-## 0.8.1 能力边界
+```python
+records = ws.range("A1:D2").to_records()
+records = ws.range("A5:D20").to_records(header_row=1)  # 字段位于工作表第2行。
+records = ws.to_records(header_row=1)                  # 整张表只有一个主数据区。
+records = table.to_records()
+```
+
+`Range.to_records()` 还可传入显式字段名序列；`headers=False` 时自动生成
+`Column1`、`Column2` 等字段名。所有 `header_row` 都是工作表绝对 0-based 行索引。
+
+批量模板与分表任务直接使用普通 Python 循环组合 `copy_sheet()`、`render()`、
+`add_sheet()` 和 `write_table()`，不再增加只包装循环的专用 API。完整参数和示例见中文
+API 手册。
+
+## 0.8.2 能力边界
 
 本版本包含工作表生命周期管理、合并单元格、行列尺寸、冻结窗格、自动筛选、页面
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域

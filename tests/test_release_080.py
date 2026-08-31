@@ -1,4 +1,4 @@
-"""0.8.1 业务报表生产力 API 回归测试。"""
+"""0.8.2 业务报表生产力 API 回归测试。"""
 
 from __future__ import annotations
 
@@ -29,10 +29,14 @@ class Release080Tests(unittest.TestCase):
         table.set_total("金额", TotalFunction.SUM)
 
         self.assertEqual(
-            worksheet.read_records("A1:B4"),
+            worksheet.range("A1:B4").to_records(),
             [{"订单号": "A-1", "金额": 20}, {"订单号": "A-2", "金额": 30}, {"订单号": "A-3", "金额": 40}],
         )
-        self.assertEqual(table.records[-1], {"订单号": "A-3", "金额": 40})
+        self.assertEqual(
+            worksheet.range("A2:B4").to_records(headers=False)[-1],
+            {"Column1": "A-3", "Column2": 40},
+        )
+        self.assertEqual(table.to_records()[-1], {"订单号": "A-3", "金额": 40})
         self.assertTrue(table.show_totals)
         self.assertEqual(table.totals["金额"], TotalFunction.SUM)
         self.assertEqual(worksheet.freeze_panes, "A2")
@@ -43,7 +47,53 @@ class Release080Tests(unittest.TestCase):
             worksheet._workbook.save(output)
             restored = Workbook.load(output).active.table("Orders")
         self.assertTrue(restored.show_totals)
-        self.assertEqual(restored.records[-1], {"订单号": "A-3", "金额": 40})
+        self.assertEqual(restored.to_records()[-1], {"订单号": "A-3", "金额": 40})
+
+    def test_range_and_worksheet_to_records(self) -> None:
+        """功能：验证外部字段行、显式字段和整表记录转换使用统一有效值。"""
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet["A1"] = "学生成绩表"
+        worksheet.range("A2:C2").set_values([["姓名", "年龄", "成绩"]])
+        worksheet.range("A5:C6").set_values([
+            ["张三", 18, 95],
+            ["李四", 19, 88],
+        ])
+        worksheet["A8"] = "王五"
+        worksheet["B8"] = 20
+        worksheet["C8"].formula = "=B8+72"
+        worksheet.range("A9:C9").set_values([["", None, ""]])
+        workbook.calculate()
+
+        self.assertEqual(
+            worksheet.range("A5:C6").to_records(header_row=1),
+            [
+                {"姓名": "张三", "年龄": 18, "成绩": 95},
+                {"姓名": "李四", "年龄": 19, "成绩": 88},
+            ],
+        )
+        self.assertEqual(
+            worksheet.range("A5:C6").to_records(headers=["name", "age", "score"])[0],
+            {"name": "张三", "age": 18, "score": 95},
+        )
+        self.assertEqual(
+            worksheet.to_records(header_row=1)[-1],
+            {"姓名": "王五", "年龄": 20, "成绩": 92},
+        )
+        self.assertEqual(len(worksheet.to_records(header_row=1)), 3)
+        self.assertEqual(worksheet["C8"].value, 92)
+        self.assertEqual(worksheet.values[7][2], 92)
+        self.assertEqual(worksheet.range("B8:C8").values, [[20, 92]])
+        with self.assertRaises(ValueError):
+            worksheet.range("A5:C8").to_records(header_row=5)
+        with self.assertRaises(ValueError):
+            worksheet.range("A5:C6").to_records(headers=["姓名"])
+        with self.assertRaises(ValueError):
+            worksheet.range("A5:C6").to_records(headers=False, header_row=1)
+        with self.assertRaises(ValueError):
+            worksheet.range("A5:C6").to_records(
+                headers=["name", "age", "score"], header_row=1
+            )
 
     def test_formula_auto_fill_and_format_proxy(self) -> None:
         """功能：公式与数值自动填充、区域数字格式代理应生效。"""
@@ -76,20 +126,11 @@ class Release080Tests(unittest.TestCase):
         self.assertEqual(worksheet["D2"].formula, "=B2*C2")
         self.assertEqual(worksheet["D3"].formula, "=B3*C3")
 
-    def test_pages_render_many_and_xlsx_extensions(self) -> None:
-        """功能：分页、模板多表渲染、条件格式和分页符应全部写入 XLSX。"""
+    def test_xlsx_extensions(self) -> None:
+        """功能：高级条件格式和分页符应全部写入 XLSX。"""
         workbook = Workbook()
-        pages = workbook.export_pages(
-            [{"编号": index} for index in range(5)], rows_per_sheet=2, sheet_name="数据"
-        )
-        self.assertEqual([sheet.name for sheet in pages], ["数据1", "数据2", "数据3"])
-
-        template = workbook.add_sheet("模板")
+        template = workbook.active
         template["A1"] = "{name}"
-        rendered = workbook.render_many(
-            [{"name": "甲"}, {"name": "乙"}], sheet_name="模板", name_pattern="报表_{name}_{index}"
-        )
-        self.assertEqual([sheet["A1"].value for sheet in rendered], ["甲", "乙"])
         template.add_color_scale("A1:A10")
         template.add_data_bar("B1:B10")
         template.add_icon_set("C1:C10", style=IconSet.THREE_ARROWS)
@@ -99,7 +140,7 @@ class Release080Tests(unittest.TestCase):
             output = Path(directory) / "report.xlsx"
             workbook.save(output)
             with zipfile.ZipFile(output) as package:
-                xml = package.read("xl/worksheets/sheet4.xml").decode("utf-8")
+                xml = package.read("xl/worksheets/sheet1.xml").decode("utf-8")
         self.assertIn("colorScale", xml)
         self.assertIn("dataBar", xml)
         self.assertIn("iconSet", xml)
@@ -123,8 +164,13 @@ class Release080Tests(unittest.TestCase):
         self.assertEqual(worksheet.column(1).outline_level, 1)
         self.assertFalse(hasattr(worksheet, "auto_filter_range"))
         self.assertFalse(hasattr(worksheet, "fill_formula"))
+        self.assertFalse(hasattr(worksheet, "read_records"))
+        self.assertFalse(hasattr(worksheet["A1"], "cached_value"))
         self.assertFalse(hasattr(worksheet.range("A1:A1"), "clear_values"))
         self.assertFalse(hasattr(worksheet.auto_filter, "add"))
+        self.assertFalse(hasattr(workbook, "render_many"))
+        self.assertFalse(hasattr(workbook, "export_pages"))
+        self.assertFalse(hasattr(worksheet.add_table("A1:A1", name="Audit"), "records"))
 
         with tempfile.TemporaryDirectory() as directory:
             xlsx = Path(directory) / "groups.xlsx"

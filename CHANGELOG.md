@@ -1,5 +1,22 @@
 # 更新日志
 
+## 0.8.2 - 2026-08-31
+
+- 统一公式读取语义：普通值和公式当前结果均由 `Cell.value` 返回，`Cell.read()`、
+  `Range.values`、`Worksheet.values` 和记录转换同步采用这一入口；删除需要调用者
+  预先判断公式类型的公开 `Cell.cached_value`。
+- 区域转字典归属 `Range.to_records(headers=True, header_row=None)`，支持区域首行、
+  区域外绝对 0-based 字段行、自动字段名或显式字段名；新增
+  `Worksheet.to_records(header_row=0)` 将单一主数据表工作表转为记录。
+- Table 使用同名 `Table.to_records()` 并委托 Range 完成转换；删除职责重复的
+  `Worksheet.read_records()` 与属性式 `Table.records`。
+- 删除只包装普通 Python 循环的 `Workbook.render_many()` 和
+  `Workbook.export_pages()`；文档改为展示由 `copy_sheet()`、`render()`、
+  `add_sheet()` 与 `write_table()` 组合实现的清晰循环。
+- 再次全面审查公开 API；保留的批量接口均承担完整验证、结构同步、原子性或
+  Excel 专有语义，不是简单循环别名。补齐全部函数的中文功能、使用方法、参数和
+  返回说明，并增加自动化文档规范检查。
+
 ## 0.8.1 - 2026-08-30
 
 - 新增 `Worksheet.group_rows()`、`ungroup_rows()`、`group_columns()` 和

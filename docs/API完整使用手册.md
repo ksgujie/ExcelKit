@@ -1,6 +1,6 @@
-# ExcelKit 0.8.1 完整中文使用与 API 手册
+# ExcelKit 0.8.2 完整中文使用与 API 手册
 
-版本：0.8.1
+版本：0.8.2
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 目录
@@ -8,7 +8,7 @@
 - [1. 安装与导入](#1-安装与导入)
 - [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
 - [3. 顶层版本 API](#3-顶层版本-api)
-  - [3.1 0.5.0 至 0.8.1 新增功能速查](#31-050-至-081-新增功能速查)
+  - [3.1 0.5.0 至 0.8.2 新增功能速查](#31-050-至-082-新增功能速查)
 - [4. Workbook 工作簿](#4-workbook-工作簿)
 - [5. Worksheet 工作表](#5-worksheet-工作表)
 - [6. Cell 单元格](#6-cell-单元格)
@@ -24,17 +24,17 @@
   - [15.1 工作表高级 API](#151-050-工作表高级-api)
   - [15.2 可视化、排序与公式 API](#152-060-可视化排序与公式-api)
   - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
-  - [15.4 业务报表生产力 API](#154-081-业务报表生产力-api)
-- [16. 0.8.1 能力边界](#16-081-能力边界)
+  - [15.4 业务报表生产力 API](#154-082-业务报表生产力-api)
+- [16. 0.8.2 能力边界](#16-082-能力边界)
 - [17. API 选择指南](#17-api-选择指南)
-- [18. 0.8.1 API 速查表](#18-081-api-速查表)
+- [18. 0.8.2 API 速查表](#18-082-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.8.1-py3-none-any.whl
+pip install excelkit-0.8.2-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -89,7 +89,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.8.1 新增功能速查
+## 3.1 0.5.0 至 0.8.2 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -170,7 +170,7 @@ ws.auto_filter.set(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.8.1"
+assert excelkit.__version__ == "0.8.2"
 ```
 
 ## 4. Workbook 工作簿
@@ -430,7 +430,7 @@ print(worksheet.values)
 | XLS | 是 | 是 | 否，仅能取得文件内缓存结果 | 是，受旧格式限制 |
 | CSV / TSV | 是 | `#...` 字面量会转换 | 不适用 | 不适用 |
 
-XLSM 中的宏不会执行；0.8.1 也不提供宏对象模型。
+XLSM 中的宏不会执行；0.8.2 也不提供宏对象模型。
 
 ### `Workbook.render(data=None, *, sheet_data=None, strict=False)`
 
@@ -640,8 +640,8 @@ Table 引用、动态数组或需要自动扩张合计区域的场景，应在�
 ### `Workbook.calculate(*, strict=False)`
 
 功能：使用 ExcelKit 的受控公式计算器计算当前工作簿中全部受支持公式。依赖公式会
-递归计算，结果写入公式专用缓存，不会覆盖 `Cell.formula`，也不会成为普通
-`Cell.value`。该方法不使用 `eval()`，只接受白名单语法和函数。
+递归计算，结果写入公式专用内部缓存，不会覆盖 `Cell.formula`；业务代码通过统一的
+`Cell.value` 读取当前结果。该方法不使用 `eval()`，只接受白名单语法和函数。
 
 参数：
 
@@ -660,9 +660,8 @@ worksheet["A2"] = 20
 worksheet["A3"].formula = "=SUM(A1:A2)"
 
 workbook.calculate()
-assert worksheet["A3"].cached_value == 30
+assert worksheet["A3"].value == 30
 assert worksheet["A3"].formula_status == "calculated"
-assert worksheet["A3"].value is None
 ```
 
 支持的运算符和函数：
@@ -1148,12 +1147,13 @@ worksheet.append_rows([
 
 ### `Worksheet.values`
 
-功能：一次读取工作表从 A1 到 `max_row`、`max_column` 的全部普通值。
+功能：一次读取工作表从 A1 到 `max_row`、`max_column` 的全部有效值。
 
 参数：无，只读属性；不提供整体赋值，批量写入使用 `Range.set_values()`、
 `append()` 或 `append_rows()`。
 
-返回：`list[list[Any]]`；空工作表返回 `[]`，空单元格和公式单元格返回 `None`。
+返回：`list[list[Any]]`；空工作表返回 `[]`。公式单元格返回当前计算结果；空单元格、
+尚未计算或结果已失效的公式返回 `None`。读取不会自动计算公式。
 
 示例：
 
@@ -1162,6 +1162,39 @@ worksheet["B2"] = 10
 assert worksheet.values == [
     [None, None],
     [None, 10],
+]
+```
+
+### `Worksheet.to_records(*, header_row=0)`
+
+功能：把整张工作表中的一个主数据表转换为字典记录列表。字段行上方的标题、说明等
+内容会被忽略；字段行最左与最右非空字段之间决定数据列，数据一直扫描到工作表末行。
+如果只需要转换中间一块矩形区域，应改用 `Range.to_records()`。
+
+参数：
+
+- `header_row: int = 0`：字段所在的工作表绝对 0-based 行索引。Excel 第1行传 `0`，
+  第2行传 `1`。签名中的 `*` 表示必须写出参数名，例如 `header_row=1`。
+
+返回：`list[dict[str, Any]]`。字段行不计入数据；完全空白的数据行自动跳过；普通值和
+公式当前结果都通过 `Cell.value` 读取。只有字段而没有数据时返回 `[]`。
+
+异常：工作表为空、字段行不存在、字段为空、字段之间有空列、字段重复或字段不是
+字符串时抛出 `ValueError`；参数类型或索引无效时抛出 `TypeError` 或
+`InvalidAddressError`。
+
+```python
+worksheet["A1"] = "学生成绩表"          # 标题行，不属于记录。
+worksheet.range("A2:C2").set_values([["姓名", "年龄", "成绩"]])
+worksheet.range("A5:C6").set_values([
+    ["张三", 18, 95],
+    ["李四", 19, 88],
+])
+
+records = worksheet.to_records(header_row=1)
+assert records == [
+    {"姓名": "张三", "年龄": 18, "成绩": 95},
+    {"姓名": "李四", "年龄": 19, "成绩": 88},
 ]
 ```
 
@@ -1274,12 +1307,15 @@ assert worksheet.cell(7, 2).address == "C8"
 
 ### `Cell.value`
 
-功能：读取或设置普通值。公式单元格的普通值为 `None`；设置任何普通值（包括
-`None`）都会清除同一位置的公式。
+功能：统一读取单元格当前有效值，或写入普通值。普通单元格读取已保存值；公式单元格
+读取最近一次有效计算结果，因此调用者不需要先判断是否存在公式。设置任何普通值
+（包括 `None`）都会清除同一位置的公式。
 
 参数：属性写入值为任意 Python 对象。
 
-返回：属性读取时返回普通值或 `None`。
+返回：属性读取时返回普通值、公式当前结果或 `None`。读取公式不会自动触发计算；
+刚设置公式、依赖被修改或结果不可用时返回 `None`，可调用 `Workbook.calculate()`
+计算受支持公式，或由 Excel/WPS 打开文件后计算。
 
 ```python
 cell = worksheet["A1"]
@@ -1348,7 +1384,7 @@ assert worksheet["A1"].value == result
 日期转换文本既可以带 `#`，也可以不带；日期时间支持 `HH:MM` 和 `HH:MM:SS`。
 转换失败抛出 `TypeError` 或 `ValueError`，原单元格保持不变。公式单元格禁止使用
 写回型 `cell.as_*()`，以免转换结果覆盖公式；应改用 `cell.read().as_*()` 转换
-已有缓存结果。
+当前有效结果。
 
 ```python
 worksheet["A1"].set_value("123").as_int()
@@ -1358,9 +1394,9 @@ worksheet["A3"].set_value("2026/8/1 12:33").as_datetime()
 
 ### `Cell.read()`
 
-功能：读取当前值并创建一个独立的 `CellValue` 快照。普通单元格读取 `value`；
-公式单元格读取当前 `cached_value`，尚无缓存时得到 `None`。快照随后可使用同名
-`as_*()` 转换，但不会写回工作表。
+功能：读取当前 `Cell.value` 并创建一个独立的 `CellValue` 快照。普通单元格保存
+普通值，公式单元格保存当前有效结果；尚无公式结果时得到 `None`。快照随后可使用
+同名 `as_*()` 转换，但不会写回工作表。
 
 参数：无。
 
@@ -1376,11 +1412,11 @@ assert snapshot.as_int() == 123
 
 ### `CellValue.value`
 
-功能：返回创建快照时读取到的原始普通值，不进行类型转换，也不会写回工作表。
+功能：返回创建快照时读取到的原始有效值，不进行类型转换，也不会写回工作表。
 
 参数：无，只读属性；不允许对 `snapshot.value` 赋值。
 
-返回：原始 Python 值；空单元格或尚无缓存的公式单元格返回 `None`。
+返回：原始 Python 值；空单元格或尚无有效结果的公式单元格返回 `None`。
 
 ```python
 worksheet["A1"].value = "123"
@@ -1415,7 +1451,7 @@ API 只保留语义明确的 `as_string()`，不提供 `as_str()`；也不提供
 ### `Cell.formula`
 
 功能：读取、设置或清除公式。写入公式会清除同一位置的普通值；赋值 `None` 清除
-公式。修改公式会使工作簿内全部公式缓存失效，避免继续使用与新依赖不一致的旧值。
+公式。修改公式会使工作簿内全部公式结果失效，避免继续使用与新依赖不一致的旧值。
 
 参数：写入值为包含表达式的非空 `str` 或 `None`；前导 `=` 可省略。
 
@@ -1428,32 +1464,31 @@ worksheet["A1"] = 10
 worksheet["A2"] = 20
 worksheet["A3"].formula = "SUM(A1:A2)"
 assert worksheet["A3"].formula == "=SUM(A1:A2)"
-assert worksheet["A3"].value is None
+assert worksheet["A3"].value is None  # 尚未计算。
+workbook.calculate()
+assert worksheet["A3"].value == 30
 worksheet["A3"].formula = None
 assert worksheet["A3"].formula is None
 ```
 
-### `Cell.cached_value`
+### `Cell.value` 与公式结果
 
-功能：读取公式最近一次已知的计算结果。结果可能来自加载的 XLSX 文件中 Excel/WPS
-保存的 `<v>`，也可能来自最近一次 `Workbook.calculate()`。它与普通 `value`
-分开保存，不会覆盖公式。
-
-参数：无，只读属性；不提供公开设置器。
-
-返回：缓存的 Python 值；普通单元格、等待计算的公式或缓存结果本身为空时返回
-`None`。可结合 `formula_status` 区分“已计算为空”和“等待计算”。
+公式本身始终保存在 `Cell.formula`，公式结果在内部独立保存，但公开读取统一使用
+`Cell.value`。这样普通值和公式结果都只需记住一个入口，同时写入 `Cell.value` 仍有
+明确语义：清除公式并写入普通值。
 
 ```python
 worksheet["C3"].formula = "=SUM(B3:B10)"
+assert worksheet["C3"].value is None       # 尚无有效结果。
 workbook.calculate()
-print(worksheet["C3"].cached_value)
+print(worksheet["C3"].value)               # 直接取得公式结果。
 ```
 
-修改任意普通值或公式都会清除工作簿全部缓存和计算错误，因为其他工作表中的公式
-也可能间接依赖该输入。XLSX 保存会写出当前缓存，并同时声明打开时自动重算；如果
-公式刚被修改但尚未计算，旧缓存不会继续写入。`.xls` 读取只能把后端提供的公式
-结果当作普通值，不能恢复独立的公式和 `cached_value`。
+修改任意普通值或公式都会清除工作簿全部派生结果和计算错误，因为其他工作表中的公式
+也可能间接依赖该输入。XLSX 保存会在内部写出当前结果，并同时声明打开时自动重算；
+如果公式刚被修改但尚未计算，旧结果不会继续写入。`.xls` 读取只能把后端提供的公式
+结果当作普通值，不能恢复独立的公式表达式。公开 API 不提供 `cached_value`，业务代码
+无需知道结果在文件中的内部存储方式。
 
 ### `Cell.formula_status`
 
@@ -1639,11 +1674,12 @@ assert worksheet.range("b3:d8").address == "B3:D8"
 
 ### `Range.values`
 
-功能：以二维 list 读取矩形区域的普通值。
+功能：以二维 list 读取矩形区域的当前有效值。
 
 参数：无，只读属性；批量写入统一使用 `set_values()`。
 
-返回：`list[list[Any]]`。空单元格和公式单元格均为 `None`。
+返回：`list[list[Any]]`。公式单元格返回当前计算结果；空单元格、尚未计算或结果
+已失效的公式返回 `None`。读取不会自动计算公式。
 
 ```python
 values = worksheet.range("A1:C2").values
@@ -2612,7 +2648,7 @@ worksheet.visibility = Worksheet.VISIBLE
 
 `XLOOKUP(lookup_value, lookup_array, return_array, if_not_found=None)` 当前实现精确匹配；
 查找区域与返回区域元素数量必须一致。命名区域可直接用于公式，例如
-`=SUM(SalesAmount)`。这些函数由 `Workbook.calculate()` 计算并写入 `cached_value`；
+`=SUM(SalesAmount)`。这些函数由 `Workbook.calculate()` 计算并写入公式内部结果；
 保存后的 Excel/WPS 仍会按自己的完整公式引擎重新计算。
 
 ```python
@@ -2700,7 +2736,7 @@ worksheet.range("A2:C100").clear(
 
 合并关系、行高、列宽、筛选和图表不会被 `Range.clear()` 改变。
 
-## 15.4 0.8.1 业务报表生产力 API
+## 15.4 0.8.2 业务报表生产力 API
 
 ### `Worksheet.write_records(row, column, records, *, headers=True)`
 
@@ -2737,17 +2773,40 @@ table = worksheet.write_table(
 `freeze_header=True` 冻结表头上方行；`auto_fit=True` 只自动调整新表涉及的列。返回的
 `Table` 可继续追加记录或配置汇总行。
 
-### `Worksheet.read_records(address, *, headers=True)` 与 `Table.records`
+### `Range.to_records(*, headers=True, header_row=None)`、`Worksheet.to_records()` 与 `Table.to_records()`
 
-功能：把连续区域或现有 Table 转为字典列表。常用于把 Excel 数据交还给业务代码。
+功能：把连续区域、单一主数据表工作表或现有 Table 转为字典记录列表。明确的局部数据块
+使用 `Range`；整张工作表只有一个主数据表时使用 `Worksheet`；已有 Table 使用自身方法。
+
+`Range.to_records()` 参数：
+
+- `headers: bool | Sequence[str] = True`：`True` 将区域首行作为字段名且不计入数据；
+  `False` 将全部行作为数据，自动生成 `Column1`、`Column2` 等字段名；字段名序列则
+  将区域全部行作为数据，序列长度必须等于区域列数。
+- `header_row: int | None = None`：字段所在的工作表绝对 0-based 行索引，读取当前
+  Range 的同一组列。它适用于字段在第2行、数据却位于 `A5:C8` 等情况。不能与
+  `headers=False` 或显式字段名同时使用，也不能位于数据区域中间。
+
+`Worksheet.to_records(header_row=0)` 的 `header_row` 同样是绝对 0-based 行索引；它
+忽略字段行上方内容和数据中的完全空白行。`Table.to_records()` 无参数，根据 Table
+自身配置选择字段名，并自动排除汇总行。
+
+返回：三个方法都返回按原始行顺序排列的 `list[dict[str, Any]]`；只有字段而没有数据时
+返回空列表。普通值与公式当前结果统一经 `Cell.value` 读取。字段含空值、非字符串、
+重复名称或数量不匹配时抛出 `ValueError`，参数类型无效时抛出 `TypeError`。
 
 ```python
-records = worksheet.read_records("A1:B100")
-records = worksheet.table("Orders").records
+records = worksheet.range("A1:B100").to_records()
+raw_records = worksheet.range("D2:F100").to_records(headers=False)
+named_records = worksheet.range("A5:C8").to_records(
+    headers=["name", "age", "score"]
+)
+external_header_records = worksheet.range("A5:C8").to_records(header_row=1)
+sheet_records = worksheet.to_records(header_row=1)
+table_records = worksheet.table("Orders").to_records()
 ```
 
-区域读取默认要求首行表头为不重复的非空字符串。`headers=False` 时全部行都是数据，字段名
-自动为 `Column1`、`Column2` 等。
+不再提供重复的 `Worksheet.read_records()` 和属性式 `Table.records`。
 
 ### `Table.append_records(records)`、`Table.set_total(column, function)` 与 `TotalFunction`
 
@@ -2882,28 +2941,38 @@ worksheet.add_horizontal_page_break(49)  # 第 49 行开始新页
 worksheet.page.fit(width=1)
 ```
 
-### `Workbook.export_pages(records, *, rows_per_sheet=50000, sheet_name="Page", headers=None, style="TableStyleMedium2")`
+### 使用普通循环进行分页写入
 
-功能：把大量字典记录拆分为多张带表头和 Table 的工作表。适用于订单、流水、日志等超长
-明细报表。
-
-```python
-pages = workbook.export_pages(orders, rows_per_sheet=50000, sheet_name="订单")
-# 自动创建：订单1、订单2、……
-```
-
-### `Workbook.render_many(items, *, sheet_name, name_pattern="{sheet}_{index}", strict=False)`
-
-功能：用同一模板表批量复制并按各自数据渲染，原模板不会被修改。名称模式可使用模板名、
-从 1 开始的序号和当前数据字段。
+分页本身是 Python 数据切片，不是 Excel 文件能力。直接组合 `add_sheet()` 与
+`write_table()` 更容易看懂，也能自由决定空数据、名称和每页样式：
 
 ```python
-pages = workbook.render_many(
-    [{"name": "张三"}, {"name": "李四"}],
-    sheet_name="合同模板",
-    name_pattern="合同_{name}_{index}",
-)
+rows_per_sheet = 50000
+for page, start in enumerate(range(0, len(orders), rows_per_sheet), 1):
+    worksheet = workbook.add_sheet(f"订单{page}")
+    worksheet.write_table(
+        0,
+        0,
+        orders[start:start + rows_per_sheet],
+        name=f"Orders{page}",
+        freeze_header=True,
+        auto_fit=True,
+    )
 ```
+
+### 使用普通循环进行批量模板渲染
+
+批量渲染同样由现有原子能力清晰组合，不需要学习额外入口。复制模板后，通过
+`sheet_data` 只渲染当前副本：
+
+```python
+for index, item in enumerate([{"name": "张三"}, {"name": "李四"}], 1):
+    target = workbook.copy_sheet("合同模板", f"合同_{item['name']}_{index}")
+    workbook.render(sheet_data={target.name: item})
+```
+
+0.8.2 删除了只包装上述循环的 `Workbook.export_pages()` 和
+`Workbook.render_many()`。这不会减少底层能力，反而让核心 API 更小、更容易记忆。
 
 ### `Worksheet.add_image(source, *, anchor, name=None)` 的内存图片支持
 
@@ -2914,14 +2983,14 @@ pages = workbook.render_many(
 worksheet.add_image(qrcode_bytes, anchor="G2", name="qrcode.png")
 ```
 
-## 16. 0.8.1 能力边界
+## 16. 0.8.2 能力边界
 
-0.8.1 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+0.8.2 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
 宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
-区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.1
+区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.2
 API 显式设置。
 
 XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保留宏。旧版 XLS 受
@@ -2935,6 +3004,9 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 | 固定 A1 单元格 | `worksheet["A1"]` | 最短、最直观 |
 | 动态行列坐标 | `worksheet.cell(row, column)` | 统一 0-based、先行后列 |
 | 连续矩形数据 | `worksheet.range("A1:C10")` | 集中读取、写入、合并 |
+| 区域转字典记录 | `worksheet.range("A1:C10").to_records()` | 转换职责留在 Range，不重复传地址 |
+| 整个单表工作表转记录 | `worksheet.to_records(header_row=0)` | 忽略字段行上方内容和数据空行 |
+| Table 转字典记录 | `table.to_records()` | 自动识别表头并排除汇总行 |
 | 连续追加二维数据 | `worksheet.append_rows(rows)` | 自动从下一空行开始 |
 | 按名称或顺序取表 | `workbook.sheet(name_or_index)` | 一个方法覆盖两种清晰参数类型 |
 | 永久改变单元格类型 | `cell.set_value(value).as_int()` 等 | 转换结果写回并保存 |
@@ -2951,20 +3023,22 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 | 批量替换数据 | `worksheet.replace(query, replacement, ...)` | 可控制大小写、完整匹配、公式与上限 |
 | 导出单张表为文本 | `worksheet.export("data.csv")` | 不会受到工作簿其他工作表影响 |
 
-不提供 `Workbook.create()`、`Worksheet.cell_at()`、`as_str()`、`append_many()`、
-`fit_width` 或 `fit_height` 等重复入口。相同能力只保留一处明确实现。
+不提供 `Workbook.create()`、`Worksheet.cell_at()`、`Worksheet.read_records()`、
+`Table.records`、`Workbook.render_many()`、`Workbook.export_pages()`、`as_str()`、
+`append_many()`、`fit_width` 或 `fit_height` 等重复或纯循环包装入口。相同能力只保留
+一处明确实现。
 
-## 18. 0.8.1 API 速查表
+## 18. 0.8.2 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
-| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`properties`、`protection`、`load`、`render`、`render_many`、`export_pages`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`read_records`、`auto_fit_columns`、`auto_fit_rows`、`group_rows`、`ungroup_rows`、`group_columns`、`ungroup_columns`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`hyperlinks`、`add_validation`、`validations`、`remove_validation`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`remove_conditional_format`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
-| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`cached_value`、`formula_status`、`calculation_error`、`dependencies`、`dependents`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
+| `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`properties`、`protection`、`load`、`render`、`calculate`、`save`、`len()` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`to_records`、`auto_fit_columns`、`auto_fit_rows`、`group_rows`、`ungroup_rows`、`group_columns`、`ungroup_columns`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`hyperlinks`、`add_validation`、`validations`、`remove_validation`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`remove_conditional_format`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`formula_status`、`calculation_error`、`dependencies`、`dependents`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
-| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear`、`copy_to`、`merge`、`unmerge` |
+| `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`to_records`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear`、`copy_to`、`merge`、`unmerge` |
 | `NamedRange` | `name`、`worksheet`、`range` |
-| `Table` | `name`、`worksheet`、`range`、`columns`、`records`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`set_total`、`resize`、`append`、`append_rows`、`append_records`、`clear_data` |
+| `Table` | `name`、`worksheet`、`range`、`columns`、`to_records`、`style`、`has_header`、`show_row_stripes`、`show_column_stripes`、`show_totals`、`totals`、`set_total`、`resize`、`append`、`append_rows`、`append_records`、`clear_data` |
 | 行列尺寸 | `RowDimension.index/height/hidden/outline_level/collapsed`、`ColumnDimension.index/width/hidden/outline_level/collapsed` |
 | 页面 | `PageSettings`、`PageMargins`、`HeaderFooter` 及本手册第 9 节全部属性 |
 | `excelkit.address` | `MAX_ROW`、`MAX_COLUMN`、`column_to_index`、`index_to_column`、`cell_index`、`range_index`、`range_address`、`cell_address` |

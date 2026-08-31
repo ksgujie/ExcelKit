@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, List
 
-from ..address import cell_address
+from ..address import cell_address, validate_row_index
 from ..autofill import AutoFillMode
 from ..style import DEFAULT_STYLE, Style
 
@@ -106,19 +106,79 @@ class Range:
 
     @property
     def values(self) -> List[List[Any]]:
-        """功能：读取区域内的全部普通值。
+        """功能：读取区域内的全部有效值。
 
         使用方法：``values = worksheet.range("A1:C2").values``。
         参数：无。
-        返回：按行组织的二维 ``list``；空单元格和公式单元格返回 ``None``。
+        返回：按行组织的二维 ``list``；公式单元格返回当前公式结果，空单元格或没有
+        有效结果的公式返回 ``None``。
         """
         return [
             [
-                self._worksheet._values.get(row, column)
+                self._worksheet.cell(row, column).value
                 for column in range(self._min_column, self._max_column + 1)
             ]
             for row in range(self._min_row, self._max_row + 1)
         ]
+
+    def to_records(
+        self,
+        *,
+        headers: bool | Sequence[str] = True,
+        header_row: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """功能：把区域按行转换为字典记录列表。
+
+        使用方法：``records = worksheet.range("A1:C100").to_records()``；如果区域
+        没有表头，使用 ``to_records(headers=False)`` 自动生成 ``Column1``、
+        ``Column2`` 等字段名；字段在区域外的 0-based 第1行时使用
+        ``to_records(header_row=1)``；也可向 ``headers`` 传入显式字段名序列。
+        参数：``headers`` 为布尔值或字段名序列；``True`` 时默认使用区域首行，
+        ``False`` 时生成字段名，序列则直接作为字段名且区域全部行都是数据；
+        ``header_row`` 为工作表绝对 0-based 字段行索引，并使用当前区域相同的列。
+        返回：按区域原始行顺序排列的 ``list[dict[str, Any]]``；只有表头而没有数据
+        时返回空列表。
+        异常：参数组合、字段数量、类型、空值或重复字段无效时抛出 ``TypeError`` 或
+        ``ValueError``；``header_row`` 位于区域中间时也会报错。
+        """
+        values = self.values
+        width = self._max_column - self._min_column + 1
+        if isinstance(headers, bool):
+            if not headers:
+                if header_row is not None:
+                    raise ValueError("headers=False 时不能同时设置 header_row")
+                names = tuple(f"Column{index}" for index in range(1, width + 1))
+            else:
+                if header_row is None:
+                    header_values = values[0]
+                    values = values[1:]
+                else:
+                    validate_row_index(header_row)
+                    if self._min_row < header_row <= self._max_row:
+                        raise ValueError("header_row 不能位于数据区域中间")
+                    header_values = [
+                        self._worksheet.cell(header_row, column).value
+                        for column in range(self._min_column, self._max_column + 1)
+                    ]
+                    if header_row == self._min_row:
+                        values = values[1:]
+                names = tuple(header_values)
+        else:
+            if header_row is not None:
+                raise ValueError("显式 headers 不能与 header_row 同时使用")
+            if isinstance(headers, (str, bytes)):
+                raise TypeError("headers 必须是 bool 或字段名序列")
+            try:
+                names = tuple(headers)
+            except TypeError as error:
+                raise TypeError("headers 必须是 bool 或字段名序列") from error
+        if len(names) != width:
+            raise ValueError(f"headers 必须包含 {width} 个字段名")
+        if any(not isinstance(value, str) or not value for value in names):
+            raise ValueError("表头必须全部是非空字符串")
+        if len(set(names)) != len(names):
+            raise ValueError("表头不能重复")
+        return [dict(zip(names, row_values)) for row_values in values]
 
     @property
     def format(self) -> "RangeFormat":
@@ -436,7 +496,12 @@ class Range:
         return target
 
     def _auto_fill_snapshots(self) -> dict[tuple[int, int], tuple[Any, Any, Any, Any, Any]]:
-        """功能：冻结自动填充源区域状态，避免目标覆盖源数据影响后续计算。"""
+        """功能：冻结自动填充源区域状态，避免目标覆盖源数据影响后续计算。
+
+        使用方法：由 :meth:`auto_fill` 在写入目标区域之前内部调用。
+        参数：无；读取当前区域边界内的值、公式、超链接、批注和样式。
+        返回：以 0-based ``(row, column)`` 为键、五类内容快照为值的字典。
+        """
         return {
             (row, column): (
                 deepcopy(self._worksheet._values.get(row, column)),
@@ -450,7 +515,12 @@ class Range:
         }
 
     def _can_fill_series(self) -> bool:
-        """功能：判断源区域是否为可自动扩展的单行或单列数值/日期序列。"""
+        """功能：判断源区域是否为可自动扩展的单行或单列数值/日期序列。
+
+        使用方法：由 :meth:`auto_fill` 的自动模式和序列模式内部调用。
+        参数：无；判断当前区域的一格或两格普通值。
+        返回：可以按序列扩展时返回 ``True``，否则返回 ``False``。
+        """
         height = self.max_row - self.min_row + 1
         width = self.max_column - self.min_column + 1
         if height != 1 and width != 1:
@@ -466,7 +536,12 @@ class Range:
         )
 
     def _series_value(self, row: int, column: int) -> Any:
-        """功能：根据一格或两格数值/日期源计算目标位置的序列值。"""
+        """功能：根据一格或两格数值/日期源计算目标位置的序列值。
+
+        使用方法：由 :meth:`auto_fill` 为每个目标位置内部调用。
+        参数：``row``、``column`` 为目标单元格的 0-based 索引，顺序为先行后列。
+        返回：按源间距推算并复制得到的数值、日期或日期时间。
+        """
         source_values = [
             self._worksheet._values.get(source_row, source_column)
             for source_row in range(self.min_row, self.max_row + 1)
@@ -550,7 +625,13 @@ class Range:
         return self.max_row - self.min_row + 1 - len(kept)
 
     def _selected_columns(self, columns: Sequence[int] | None) -> tuple[int, ...]:
-        """功能：验证并返回区域去重所使用的相对列索引。"""
+        """功能：验证并返回区域去重所使用的相对列索引。
+
+        使用方法：由 :meth:`remove_duplicates` 内部调用。
+        参数：``columns`` 为相对于当前区域左侧的 0-based 列索引序列或 ``None``。
+        返回：验证后的索引元组；``None`` 转换为当前区域全部列。
+        异常：序列为空、类型错误、包含布尔值或索引越界时抛出异常。
+        """
         width = self.max_column - self.min_column + 1
         if columns is None:
             return tuple(range(width))
@@ -562,7 +643,14 @@ class Range:
         return result
 
     def _rewrite_rows(self, source_rows: list[int], *, has_header: bool) -> None:
-        """功能：按原始行快照重写区域行，用于去重和清除空白行。"""
+        """功能：按原始行快照重写区域行，用于去重和清除空白行。
+
+        使用方法：由 :meth:`remove_duplicates` 和 :meth:`remove_blank_rows` 内部调用。
+        参数：``source_rows`` 为按新顺序保留的绝对 0-based 行索引；``has_header``
+        控制是否保留区域首行不参与重写。
+        返回：``None``；值、公式、样式和附属对象同步移动，剩余位置清空。
+        异常：当前区域与合并单元格相交时抛出 ``ValueError``。
+        """
         if any(
             not (merged.max_row < self.min_row or merged.min_row > self.max_row
                  or merged.max_column < self.min_column or merged.min_column > self.max_column)
@@ -609,7 +697,12 @@ class RangeFormat:
 
     @property
     def number(self) -> str | None:
-        """功能：读取区域统一数字格式；不一致时返回 ``None``。"""
+        """功能：读取区域统一数字格式；不一致时返回 ``None``。
+
+        使用方法：``number_format = worksheet.range(''C2:C20'').format.number``。
+        参数：无，只读时不需要参数。
+        返回：全部单元格一致时返回 Excel 数字格式字符串，否则返回 ``None``。
+        """
         values = {
             self._range._worksheet._styles.get((row, column), DEFAULT_STYLE).number_format
             for row in range(self._range.min_row, self._range.max_row + 1)
@@ -619,7 +712,13 @@ class RangeFormat:
 
     @number.setter
     def number(self, value: str) -> None:
-        """功能：设置整个区域的 Excel 数字格式。"""
+        """功能：设置整个区域的 Excel 数字格式。
+
+        使用方法：``worksheet.range(''C2:C20'').format.number = ''0.00''``。
+        参数：``value`` 为非空 Excel 数字格式字符串。
+        返回：``None``；区域中每个单元格保留其他样式字段。
+        异常：值不是非空字符串时抛出 ``ValueError``。
+        """
         if not isinstance(value, str) or not value:
             raise ValueError("number 必须是非空 Excel 数字格式字符串")
         for row in range(self._range.min_row, self._range.max_row + 1):

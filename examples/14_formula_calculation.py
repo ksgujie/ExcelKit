@@ -30,10 +30,9 @@ def create_formula_workbook() -> Workbook:
     summary["B2"].formula = '=CONCAT("合计：",ROUND(B1,2))'
 
     workbook.calculate()
-    assert summary["B1"].cached_value == 63
+    assert summary["B1"].value == 63
     assert summary["B1"].formula_status == "calculated"
     assert summary["B1"].read().as_float() == 63.0
-    assert summary["B1"].value is None
     return workbook
 
 
