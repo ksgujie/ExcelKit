@@ -121,6 +121,44 @@ class Range:
             for row in range(self._min_row, self._max_row + 1)
         ]
 
+    @property
+    def is_empty(self) -> bool:
+        """功能：判断区域是否没有任何有效内容。
+
+        使用方法：``worksheet.range("A1:C3").is_empty``。
+        参数：无，只读属性；普通值、公式（即使结果为空）、样式、链接和批注中，
+        仅检查普通值与公式是否存在。
+        返回：区域内没有普通值和公式时为 ``True``，否则为 ``False``。
+        """
+        coordinates = set(self._worksheet._values._values) | set(self._worksheet._formulas)
+        return not any(
+            self._min_row <= row <= self._max_row
+            and self._min_column <= column <= self._max_column
+            for row, column in coordinates
+        )
+
+    def transpose_to(self, target: "Range") -> "Range":
+        """功能：将当前区域的有效值转置写入目标区域。
+
+        使用方法：``source.transpose_to(worksheet.range("E1:G2"))``。
+        参数：``target`` 为同一工作簿中、大小应等于源区域转置尺寸的目标区域。
+        返回：目标 :class:`Range`，便于继续链式调用；公式会写入为当前计算结果。
+        异常：目标类型、工作簿归属或尺寸不匹配时抛出 ``TypeError`` 或 ``ValueError``。
+        """
+        if not isinstance(target, Range):
+            raise TypeError("target 必须是 Range")
+        if target.worksheet._workbook is not self._worksheet._workbook:
+            raise ValueError("目标区域必须属于同一工作簿")
+        source_rows = self._max_row - self._min_row + 1
+        source_columns = self._max_column - self._min_column + 1
+        target_rows = target._max_row - target._min_row + 1
+        target_columns = target._max_column - target._min_column + 1
+        if (target_rows, target_columns) != (source_columns, source_rows):
+            raise ValueError("目标区域尺寸必须等于源区域转置后的尺寸")
+        matrix = self.values
+        transposed = [list(row) for row in zip(*matrix)]
+        return target.set_values(transposed)
+
     def to_records(
         self,
         *,

@@ -1,14 +1,14 @@
-# ExcelKit 0.8.2
+# ExcelKit 0.9.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.8.2 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.9.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.8.2-py3-none-any.whl
+pip install excelkit-0.9.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -66,7 +66,7 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `render(data=None, *, sheet_data=None, strict=False)`：使用公共或分工作表数据
   替换模板标签并展开循环行块。
 - `calculate(*, strict=False)`：在 Python 中计算当前支持的公式并更新缓存结果。
-- `save(filename, *, encoding=..., delimiter=..., formulas=False)`：保存 XLSX、XLS；
+- `save(filename, *, encoding=..., delimiter=..., formulas=False, validate=False)`：保存 XLSX、XLS；
   单工作表还可保存 CSV/TSV。
 
 ### Worksheet
@@ -78,6 +78,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `append(values)`：追加一行；空表从索引 0、即 A1 开始。
 - `append_rows(rows)`：原子校验并连续追加二维数据。
 - `values`：返回从 A1 到已触及边界的全部普通值二维列表。
+- `used_range`：返回实际使用对象覆盖的最小 `Range`，空表为 `None`。
+- `validate()`：只读检查工作表结构并返回中文问题列表。
 - `max_row`、`max_column`：已经触及的最大 0-based 索引；空表为 `-1`。
 - `name`：读取或设置工作表名称；设置时同步 Workbook 名称索引。
 - `color`：读取、设置或清除工作表标签颜色。
@@ -97,6 +99,19 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `add_table(address, *, name, ...)`：在连续区域上创建基础 Excel 数据表；Table 支持
   `columns`、`resize()`、`append()`、`append_rows()`、`clear_data()` 和汇总行。
 - `table(name)`、`tables`、`remove_table(name)`：查询、枚举或删除本表数据表定义。
+
+## 0.9.0 新增
+
+```python
+area = worksheet.used_range
+assert not worksheet.range("A1:C3").is_empty
+worksheet.range("A1:B3").transpose_to(worksheet.range("E1:G2"))
+problems = workbook.validate()
+workbook.save("report.xlsx", validate=True)
+```
+
+公式计算新增 `SUMIFS`、`COUNTIFS`、`INDEX`、`MATCH`、`IFNA` 和 `TEXT`，例如：
+`=INDEX(C2:C10,MATCH("李四",A2:A10,0))`。
 
 `cell_at` 已彻底删除。数字坐标和 A1 地址统一由 `cell()` 处理。
 

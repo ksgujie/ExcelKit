@@ -516,6 +516,7 @@ class Workbook:
         encoding: str = "utf-8-sig",
         delimiter: str | None = None,
         formulas: bool = False,
+        validate: bool = False,
     ) -> "Workbook":
         """功能：按文件扩展名将当前工作簿保存为 Excel、CSV 或 TSV 文件。
 
@@ -525,7 +526,8 @@ class Workbook:
         ``.xls`` 使用 Excel 97–2003 格式，``.xlsx`` 使用 Open XML 格式；扩展名
         不区分大小写。``.csv``、``.tsv`` 仅可用于恰好一张工作表，``encoding``
         默认为 Excel 兼容的 UTF-8 BOM，``delimiter`` 可覆盖默认分隔符，``formulas``
-        为真时导出公式文本。三个文本参数不适用于 Excel 文件。
+        为真时导出公式文本。``validate`` 为真时写出前执行 :meth:`validate`，发现
+        问题立即抛出 ``ValueError``。三个文本参数不适用于 Excel 文件。
         返回：当前 :class:`Workbook`，用于链式调用。
         异常：扩展名不受支持、多表导出文本或 Excel 文件使用文本参数时抛出
         ``InvalidFileError`` 或 ``ValueError``；路径不可写时透传文件系统异常。
@@ -533,6 +535,8 @@ class Workbook:
         """
         if not isinstance(filename, (str, os.PathLike)):
             raise TypeError("filename 必须是字符串或 PathLike 对象")
+        if not isinstance(validate, bool):
+            raise TypeError("validate 必须是 bool")
         suffix = Path(filename).suffix.lower()
         if suffix not in {".xlsx", ".xls", ".csv", ".tsv"}:
             raise InvalidFileError(
@@ -540,6 +544,10 @@ class Workbook:
             )
         if not self._sheets:
             self.active
+        if validate:
+            problems = self.validate()
+            if problems:
+                raise ValueError("工作簿校验失败：" + "；".join(problems))
         if suffix in {".csv", ".tsv"}:
             if len(self._sheets) != 1:
                 raise InvalidFileError("CSV/TSV 导出要求工作簿恰好包含一张工作表")
@@ -561,6 +569,40 @@ class Workbook:
 
             XlsxWriter(self).write(filename)
         return self
+
+    def validate(self) -> list[str]:
+        """功能：检查工作簿及其全部工作表的结构完整性。
+
+        使用方法：``problems = workbook.validate()``；保存时可使用
+        ``workbook.save("output.xlsx", validate=True)`` 自动阻止问题文件写出。
+        参数：无；方法只读，不会修复工作簿。
+        返回：中文问题描述字符串列表；空列表表示当前结构通过检查。
+        """
+        problems: list[str] = []
+        seen_names: set[str] = set()
+        for worksheet in self._sheets:
+            key = worksheet.name.casefold()
+            if key in seen_names:
+                problems.append(f"工作表名称重复：{worksheet.name!r}")
+            seen_names.add(key)
+            problems.extend(f"工作表 {worksheet.name!r}：{item}" for item in worksheet.validate())
+        table_names: dict[str, str] = {}
+        for worksheet in self._sheets:
+            for table in worksheet.tables:
+                key = table.name.casefold()
+                previous = table_names.get(key)
+                if previous is not None:
+                    problems.append(f"数据表名称重复：{previous!r} 与 {table.name!r}")
+                else:
+                    table_names[key] = table.name
+        for named_range in self._named_ranges.values():
+            if named_range.worksheet not in self._sheets:
+                problems.append(f"命名区域 {named_range.name!r} 所属工作表不存在")
+                continue
+            min_row, min_column, max_row, max_column = named_range._bounds
+            if min_row < 0 or min_column < 0 or min_row > max_row or min_column > max_column:
+                problems.append(f"命名区域 {named_range.name!r} 边界无效")
+        return problems
 
     def render(
         self,

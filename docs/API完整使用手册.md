@@ -1,6 +1,6 @@
-# ExcelKit 0.8.2 完整中文使用与 API 手册
+# ExcelKit 0.9.0 完整中文使用与 API 手册
 
-版本：0.8.2
+版本：0.9.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 目录
@@ -8,7 +8,7 @@
 - [1. 安装与导入](#1-安装与导入)
 - [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
 - [3. 顶层版本 API](#3-顶层版本-api)
-  - [3.1 0.5.0 至 0.8.2 新增功能速查](#31-050-至-082-新增功能速查)
+  - [3.1 0.5.0 至 0.9.0 新增功能速查](#31-050-至-090-新增功能速查)
 - [4. Workbook 工作簿](#4-workbook-工作簿)
 - [5. Worksheet 工作表](#5-worksheet-工作表)
 - [6. Cell 单元格](#6-cell-单元格)
@@ -25,16 +25,17 @@
   - [15.2 可视化、排序与公式 API](#152-060-可视化排序与公式-api)
   - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
   - [15.4 业务报表生产力 API](#154-082-业务报表生产力-api)
-- [16. 0.8.2 能力边界](#16-082-能力边界)
+  - [15.5 0.9.0 数据校验与公式 API](#155-090-数据校验与公式-api)
+- [16. 0.9.0 能力边界](#16-090-能力边界)
 - [17. API 选择指南](#17-api-选择指南)
-- [18. 0.8.2 API 速查表](#18-082-api-速查表)
+- [18. 0.9.0 API 速查表](#18-090-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.8.2-py3-none-any.whl
+pip install excelkit-0.9.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -89,7 +90,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.8.2 新增功能速查
+## 3.1 0.5.0 至 0.9.0 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -170,7 +171,7 @@ ws.auto_filter.set(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.8.2"
+assert excelkit.__version__ == "0.9.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -2983,7 +2984,63 @@ for index, item in enumerate([{"name": "张三"}, {"name": "李四"}], 1):
 worksheet.add_image(qrcode_bytes, anchor="G2", name="qrcode.png")
 ```
 
-## 16. 0.8.2 能力边界
+## 15.5 0.9.0 数据校验与公式 API
+
+### 15.5.1 使用范围与空区域
+
+`worksheet.used_range` 返回实际对象覆盖的最小矩形区域；没有普通值、公式、样式、
+链接、批注、合并区域、表格、验证、条件格式、图表或图片时返回 `None`。它不会因为
+历史上曾经写过又清空的单元格而扩大范围。
+
+```python
+area = ws.used_range
+if area is not None:
+    print(area.address)
+print(ws.range("A1:C10").is_empty)
+```
+
+`Range.is_empty` 只判断普通值和公式是否存在；样式、链接和批注本身不算数据内容。
+公式即使当前结果为 `None` 也会被视为非空。
+
+### 15.5.2 工作簿校验
+
+`worksheet.validate()` 检查合并区域、数据表重叠、公式依赖、验证/条件格式、筛选
+范围和冻结窗格，返回中文问题列表，不修改对象。`workbook.validate()` 另外检查
+工作表名称、工作簿级数据表名称和命名区域归属。
+
+```python
+problems = wb.validate()
+if problems:
+    for message in problems:
+        print(message)
+wb.save("report.xlsx", validate=True)  # 有问题时抛出 ValueError
+```
+
+### 15.5.3 区域转置
+
+`source.transpose_to(target)` 将源区域的当前有效值按行列互换后写入目标区域。目标
+区域行数必须等于源列数、列数必须等于源行数；公式会以当前计算结果写入普通值。
+
+```python
+ws.range("A1:C2").transpose_to(ws.range("E1:F3"))
+```
+
+### 15.5.4 新增公式函数
+
+支持 `SUMIFS(sum_range, range1, criterion1, ...)`、`COUNTIFS(range1, criterion1, ...)`、
+`INDEX(array, row_num, [column_num])`、`MATCH(value, array, [match_type])`、
+`IFNA(value, fallback)` 和 `TEXT(value, format_text)`。`INDEX`/`MATCH` 的函数序号
+遵循 Excel 1-based 规则，工作表坐标参数仍始终是 0-based。
+
+```python
+ws["D2"].formula = '=SUMIFS(C2:C10,A2:A10,"销售",B2:B10,"华东")'
+ws["D3"].formula = '=INDEX(C2:C10,MATCH("李四",A2:A10,0))'
+ws["D4"].formula = '=IFNA(MATCH("不存在",A2:A10,0),"未找到")'
+ws["D5"].formula = '=TEXT(1234.5,"#,##0.00")'
+wb.calculate(strict=True)
+```
+
+## 16. 0.9.0 能力边界
 
 0.8.2 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
 公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
@@ -3028,7 +3085,7 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 `append_many()`、`fit_width` 或 `fit_height` 等重复或纯循环包装入口。相同能力只保留
 一处明确实现。
 
-## 18. 0.8.2 API 速查表
+## 18. 0.9.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|

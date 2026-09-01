@@ -1057,6 +1057,99 @@ class Worksheet:
         end_address = cell_address(self._max_row, self._max_column)
         return self.range(f"A1:{end_address}").values
 
+    @property
+    def used_range(self) -> Range | None:
+        """功能：返回工作表实际使用内容覆盖的最小矩形区域。
+
+        使用方法：``area = worksheet.used_range``；空工作表返回 ``None``。
+        参数：无，只读属性。普通值、公式、样式、链接、批注、合并区域、数据表、
+        验证、条件格式以及图表和图片锚点都会计入使用范围。
+        返回：覆盖所有已使用对象的 :class:`Range`；清空单元格后不会受历史最大索引影响。
+        """
+        coordinates: set[tuple[int, int]] = set(self._values._values) | set(self._formulas)
+        coordinates |= set(self._styles) | set(self._hyperlinks) | set(self._notes)
+        for min_row, min_column, max_row, max_column in self._merged_ranges:
+            coordinates.update({(min_row, min_column), (max_row, max_column)})
+        ranges: list[str] = [table.range.address for table in self._tables.values()]
+        ranges.extend(item.range for item in self._validations)
+        ranges.extend(item.range for item in self._conditionals)
+        if self._filter_range:
+            ranges.append(self._filter_range)
+        for address in ranges:
+            try:
+                min_row, min_column, max_row, max_column = range_index(address)
+            except (TypeError, ValueError):
+                continue
+            coordinates.update({(min_row, min_column), (max_row, max_column)})
+        for item in (*self._charts, *self._images):
+            try:
+                row, column = cell_index(item.anchor)
+            except (TypeError, ValueError):
+                continue
+            coordinates.add((row, column))
+        if not coordinates:
+            return None
+        rows = [item[0] for item in coordinates]
+        columns = [item[1] for item in coordinates]
+        return Range(self, min(rows), min(columns), max(rows), max(columns))
+
+    def validate(self) -> list[str]:
+        """功能：检查工作表结构并返回可读的问题列表。
+
+        使用方法：``problems = worksheet.validate()``；列表为空表示未发现问题。
+        参数：无；该方法只读，不会修复或修改工作表。
+        返回：中文问题描述字符串列表，包含地址、对象名称或公式依赖等上下文。
+        """
+        from .calculation import formula_dependencies
+
+        problems: list[str] = []
+        for bounds in self._merged_ranges:
+            min_row, min_column, max_row, max_column = bounds
+            if min_row > max_row or min_column > max_column:
+                problems.append(f"合并区域边界无效：{bounds!r}")
+        table_items = list(self._tables.values())
+        for index, table in enumerate(table_items):
+            try:
+                table_bounds = range_index(table.range.address)
+            except (TypeError, ValueError) as error:
+                problems.append(f"数据表 {table.name!r} 地址无效：{error}")
+                continue
+            if table_bounds[0] > table_bounds[2] or table_bounds[1] > table_bounds[3]:
+                problems.append(f"数据表 {table.name!r} 边界无效")
+            for other in table_items[index + 1:]:
+                try:
+                    other_bounds = range_index(other.range.address)
+                except (TypeError, ValueError):
+                    continue
+                if not (
+                    table_bounds[2] < other_bounds[0]
+                    or other_bounds[2] < table_bounds[0]
+                    or table_bounds[3] < other_bounds[1]
+                    or other_bounds[3] < table_bounds[1]
+                ):
+                    problems.append(f"数据表 {table.name!r} 与 {other.name!r} 区域重叠")
+        for coordinate, formula in self._formulas.items():
+            try:
+                formula_dependencies(self._workbook, self, formula)
+            except Exception as error:
+                problems.append(f"公式 {self.cell(*coordinate).address} 无法解析：{error}")
+        for item in (*self._validations, *self._conditionals):
+            try:
+                range_index(item.range)
+            except (TypeError, ValueError) as error:
+                problems.append(f"规则区域 {item.range!r} 无效：{error}")
+        if self._filter_range:
+            try:
+                range_index(self._filter_range)
+            except (TypeError, ValueError) as error:
+                problems.append(f"筛选区域无效：{error}")
+        if self._freeze:
+            try:
+                cell_index(self._freeze)
+            except (TypeError, ValueError) as error:
+                problems.append(f"冻结窗格地址无效：{error}")
+        return problems
+
     def to_records(self, *, header_row: int = 0) -> list[dict[str, Any]]:
         """功能：把单一主数据表工作表转换为字典记录列表。
 

@@ -353,6 +353,161 @@ def _averageif(criteria_range: Any, criterion: Any, average_range: Any = None) -
     return sum(values) / len(values)
 
 
+def _criteria_indexes(*criteria_pairs: Any) -> list[int]:
+    """功能：计算多组条件区域同时满足条件的位置索引。
+
+    使用方法：由 ``SUMIFS`` 和 ``COUNTIFS`` 内部调用。
+    参数：``criteria_pairs`` 必须按 ``区域、条件`` 成对传入；所有区域长度必须一致。
+    返回：满足全部条件的 0-based 一维位置索引列表。
+    异常：参数数量不是偶数或区域长度不一致时抛出 ``FormulaCalculationError``。
+    """
+    if not criteria_pairs or len(criteria_pairs) % 2:
+        raise FormulaCalculationError("条件函数必须传入成对的区域和条件")
+    first = _flatten([criteria_pairs[0]])
+    ranges = [first]
+    criteria = list(criteria_pairs[1::2])
+    for item in criteria_pairs[2::2]:
+        values = _flatten([item])
+        if len(values) != len(first):
+            raise FormulaCalculationError("所有条件区域大小必须一致")
+        ranges.append(values)
+    return [
+        index for index in range(len(first))
+        if all(_criterion_matches(ranges[pos][index], criteria[pos]) for pos in range(len(ranges)))
+    ]
+
+
+def _sumifs(sum_range: Any, *criteria_pairs: Any) -> float | int:
+    """功能：对同时满足多组条件的位置求和。
+
+    使用方法：公式 ``=SUMIFS(C2:C100,A2:A100,"销售",B2:B100,"华东")``。
+    参数：``sum_range`` 为求和区域；其余参数按条件区域、条件成对传入。
+    返回：匹配位置的有效数值总和；没有匹配数值时返回 ``0``。
+    异常：区域大小或参数结构无效时抛出 ``FormulaCalculationError``。
+    """
+    values = _flatten([sum_range])
+    if criteria_pairs:
+        first_length = len(_flatten([criteria_pairs[0]]))
+        if len(values) != first_length:
+            raise FormulaCalculationError("SUMIFS 求和区域与条件区域大小必须一致")
+    indexes = _criteria_indexes(*criteria_pairs)
+    if any(index >= len(values) for index in indexes):
+        raise FormulaCalculationError("SUMIFS 求和区域与条件区域大小必须一致")
+    return sum(_numbers(values[index] for index in indexes))
+
+
+def _countifs(*criteria_pairs: Any) -> int:
+    """功能：统计同时满足多组条件的位置数量。
+
+    使用方法：公式 ``=COUNTIFS(A2:A100,"销售",B2:B100,"华东")``。
+    参数：参数必须按条件区域、条件成对传入。
+    返回：同时满足全部条件的元素数量。
+    异常：参数结构或区域大小无效时抛出 ``FormulaCalculationError``。
+    """
+    return len(_criteria_indexes(*criteria_pairs))
+
+
+def _index(array: Any, row_number: int, column_number: int = 1) -> Any:
+    """功能：按 Excel 的 1-based 行列序号取得数组元素。
+
+    使用方法：公式 ``=INDEX(A2:C10,2,3)`` 或 ``=INDEX(A2:A10,2)``。
+    参数：``array`` 为一维或二维区域；``row_number`` 和 ``column_number`` 为正整数，
+    均采用 Excel 1-based 序号。
+    返回：指定位置的元素。
+    异常：数组维度、序号或位置越界时抛出 ``FormulaCalculationError``。
+    """
+    if any(isinstance(item, bool) or not isinstance(item, int) or item < 1 for item in (row_number, column_number)):
+        raise FormulaCalculationError("INDEX 的行列序号必须是正整数")
+    rows = array if isinstance(array, (list, tuple)) else [array]
+    if not rows:
+        raise FormulaCalculationError("INDEX 数组不能为空")
+    if not isinstance(rows[0], (list, tuple)):
+        if column_number != 1 or row_number > len(rows):
+            raise FormulaCalculationError("INDEX 位置超出数组范围")
+        return rows[row_number - 1]
+    if row_number > len(rows) or any(not isinstance(row, (list, tuple)) for row in rows):
+        raise FormulaCalculationError("INDEX 位置超出数组范围")
+    row = rows[row_number - 1]
+    if column_number == 1 and all(len(item) == 1 for item in rows):
+        return row[0]
+    if column_number > len(row):
+        raise FormulaCalculationError("INDEX 位置超出数组范围")
+    return row[column_number - 1]
+
+
+def _match(value: Any, lookup_array: Any, match_type: int = 0) -> int:
+    """功能：在一维区域中查找值并返回 Excel 1-based 位置。
+
+    使用方法：公式 ``=MATCH("李四",A2:A10,0)``；``match_type`` 为 0 时精确匹配，
+    为 1 或 -1 时按升序或降序近似匹配。
+    参数：``value`` 为查找值；``lookup_array`` 为一维区域；``match_type`` 为 0、1、-1。
+    返回：匹配项的 1-based 位置。
+    异常：数组不是一维、匹配类型无效或未找到时抛出 ``FormulaCalculationError``。
+    """
+    if isinstance(match_type, bool) or not isinstance(match_type, int) or match_type not in (-1, 0, 1):
+        raise FormulaCalculationError("MATCH 的匹配类型必须是 -1、0 或 1")
+    values = _flatten([lookup_array])
+    if match_type == 0:
+        for index, item in enumerate(values):
+            if item == value:
+                return index + 1
+    elif match_type == 1:
+        selected = None
+        for index, item in enumerate(values):
+            if item == value:
+                return index + 1
+            try:
+                if item <= value:
+                    selected = index + 1
+            except TypeError:
+                continue
+        if selected is not None:
+            return selected
+    else:
+        selected = None
+        for index, item in enumerate(values):
+            if item == value:
+                return index + 1
+            try:
+                if item >= value:
+                    selected = index + 1
+                elif selected is not None:
+                    break
+            except TypeError:
+                continue
+        if selected is not None:
+            return selected
+    raise FormulaCalculationError("MATCH 未找到匹配项")
+
+
+def _text(value: Any, format_text: str) -> str:
+    """功能：按常用 Excel 格式代码把值格式化为文本。
+
+    使用方法：公式 ``=TEXT(A1,"#,##0.00")`` 或 ``=TEXT(A1,"yyyy-mm-dd")``。
+    参数：``value`` 为数值、日期或时间；``format_text`` 为格式代码字符串。
+    返回：格式化后的字符串；不支持的格式使用 Python 字符串表示。
+    异常：格式参数不是字符串时抛出 ``FormulaCalculationError``。
+    """
+    if not isinstance(format_text, str):
+        raise FormulaCalculationError("TEXT 的格式代码必须是字符串")
+    if isinstance(value, datetime):
+        if format_text in {"yyyy-mm-dd", "yyyy/mm/dd"}:
+            return value.strftime("%Y-%m-%d" if "-" in format_text else "%Y/%m/%d")
+        if format_text in {"hh:mm", "hh:mm:ss"}:
+            return value.strftime("%H:%M" if format_text == "hh:mm" else "%H:%M:%S")
+    if isinstance(value, date):
+        if format_text in {"yyyy-mm-dd", "yyyy/mm/dd"}:
+            return value.strftime("%Y-%m-%d" if "-" in format_text else "%Y/%m/%d")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if format_text.endswith("%"):
+            decimals = len(format_text.split(".", 1)[1].rstrip("%")) if "." in format_text else 0
+            return f"{value * 100:.{decimals}f}%"
+        if format_text in {"#,##0", "#,##0.00", "0.00"}:
+            decimals = len(format_text.split(".", 1)[1]) if "." in format_text else 0
+            return f"{value:,.{decimals}f}"
+    return str(value)
+
+
 def _date(year: int, month: int, day: int) -> date:
     """功能：按年、月、日构造日期。
 
@@ -474,6 +629,11 @@ _FUNCTIONS: dict[str, Callable[..., Any]] = {
     "SUMIF": _sumif,
     "COUNTIF": _countif,
     "AVERAGEIF": _averageif,
+    "SUMIFS": _sumifs,
+    "COUNTIFS": _countifs,
+    "INDEX": _index,
+    "MATCH": _match,
+    "TEXT": _text,
     "DATE": _date,
     "YEAR": lambda value: value.year if isinstance(value, (date, datetime)) else _date_error("YEAR", value),
     "MONTH": lambda value: value.month if isinstance(value, (date, datetime)) else _date_error("MONTH", value),
@@ -679,6 +839,13 @@ class _Evaluator:
                 try:
                     return self.node(node.args[0], variables)
                 except Exception:
+                    return self.node(node.args[1], variables)
+            if name == "IFNA":
+                if len(node.args) != 2:
+                    raise FormulaCalculationError("IFNA 需要2个参数")
+                try:
+                    return self.node(node.args[0], variables)
+                except FormulaCalculationError:
                     return self.node(node.args[1], variables)
             function = _FUNCTIONS.get(name)
             if function is None:

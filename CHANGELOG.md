@@ -1,5 +1,14 @@
 # 更新日志
 
+## 0.9.0 - 2026-09-01
+
+- 新增 `Worksheet.used_range`、`Range.is_empty` 和 `Range.transpose_to()`，便于发现实际
+  使用区域、判断空区域及转置数据。
+- 新增 `Workbook.validate()`、`Worksheet.validate()`，并支持 `Workbook.save(...,
+  validate=True)` 在写出前阻止结构问题。
+- 公式计算新增 `SUMIFS`、`COUNTIFS`、`INDEX`、`MATCH`、`IFNA` 和 `TEXT`。
+- 更新完整中文 API 手册、示例和回归测试。
+
 ## 0.8.2 - 2026-08-31
 
 - 统一公式读取语义：普通值和公式当前结果均由 `Cell.value` 返回，`Cell.read()`、
