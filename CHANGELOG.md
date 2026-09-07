@@ -1,5 +1,15 @@
 # 更新日志
 
+## 0.10.0 - 2026-09-07
+
+- 新增 `ImagePlacement` 与 `ImageFit` 图片常量，`Worksheet.add_image()` 支持单元格或
+  矩形区域锚定、STRETCH/CONTAIN/COVER 三种填充策略。
+- 新增 `Worksheet.image(anchor_or_index)` 查询图片；`images`、`used_range`、行列插入/删除
+  和 `Workbook.copy_sheet()` 同步处理图片对象。
+- XLSX 写出采用标准 `twoCellAnchor` 表达随单元格移动和缩放，并支持图片 DrawingML
+  读回；XLS 对 CELL 图片给出明确错误提示。
+- 更新顶层图片 API、完整中文手册、README、示例和回归测试，版本提升至 0.10.0。
+
 ## 0.9.0 - 2026-09-01
 
 - 新增 `Worksheet.used_range`、`Range.is_empty` 和 `Range.transpose_to()`，便于发现实际

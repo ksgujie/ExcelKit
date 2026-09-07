@@ -413,8 +413,13 @@ class Workbook:
                 copied_table._show_totals = True
             copied_table._totals.update(table.totals)
         for image in source.images:
+            image_name = Path(image.filename).name or f"image.{image.format}"
             copied_image = target.add_image(
-                image.payload, anchor=image.anchor, name=image.filename
+                image.payload,
+                anchor=image.anchor,
+                name=image_name,
+                placement=image.placement,
+                fit=image.fit,
             )
             copied_image.width = image.width
             copied_image.height = image.height
@@ -561,6 +566,16 @@ class Workbook:
             if encoding != "utf-8-sig" or delimiter is not None or formulas:
                 raise ValueError("encoding、delimiter、formulas 仅适用于 CSV/TSV 文件")
         if suffix == ".xls":
+            from ..image import ImagePlacement
+
+            if any(
+                image.placement == ImagePlacement.CELL
+                for worksheet in self._sheets
+                for image in worksheet.images
+            ):
+                raise ValueError(
+                    "XLS 二进制格式不支持随单元格缩放的图片，请改用 .xlsx 保存"
+                )
             from ..writer.xls import XlsWriter
 
             XlsWriter(self).write(filename)

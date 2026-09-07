@@ -8,6 +8,7 @@ from .range import Range
 from .workbook import Workbook
 from .worksheet import Worksheet
 from .table import Table, TotalFunction
+from ..image import Image, ImageFit, ImagePlacement
 
 __all__ = [
     "Workbook",
@@ -23,4 +24,7 @@ __all__ = [
     "NamedRange",
     "Table",
     "TotalFunction",
+    "Image",
+    "ImageFit",
+    "ImagePlacement",
 ]

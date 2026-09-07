@@ -38,6 +38,7 @@ _CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 _VML_NS = "urn:schemas-microsoft-com:vml"
 _OFFICE_NS = "urn:schemas-microsoft-com:office:office"
 _EXCEL_NS = "urn:schemas-microsoft-com:office:excel"
+_EXCELKIT_NS = "https://github.com/ksgujie/ExcelKit"
 
 ET.register_namespace("", _MAIN_NS)
 ET.register_namespace("r", _REL_NS)
@@ -51,6 +52,7 @@ ET.register_namespace("v", _VML_NS)
 ET.register_namespace("o", _OFFICE_NS)
 ET.register_namespace("x", _EXCEL_NS)
 ET.register_namespace("xsi", _XSI_NS)
+ET.register_namespace("ek", _EXCELKIT_NS)
 
 _ILLEGAL_XML_CHARACTERS = re.compile(
     "[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]"
@@ -674,6 +676,140 @@ def chart_xml(chart: object) -> bytes:
     return _xml_bytes(root)
 
 
+def _column_pixel_width(worksheet: "Worksheet", column: int) -> int:
+    """功能：把工作表列宽近似换算为像素。
+
+    使用方法：由图片区域几何计算内部调用。
+    参数：``worksheet`` 为所属工作表；``column`` 为 0-based 列索引。
+    返回：该列在 96 DPI 下的像素宽度；隐藏列返回 ``0``。
+    """
+    dimension = worksheet._columns.get(column)
+    if dimension is not None and dimension.hidden:
+        return 0
+    width = 8.43 if dimension is None or dimension.width is None else dimension.width
+    return max(1, int(round(width * 7 + 5)))
+
+
+def _row_pixel_height(worksheet: "Worksheet", row: int) -> int:
+    """功能：把工作表行高近似换算为像素。
+
+    使用方法：由图片区域几何计算内部调用。
+    参数：``worksheet`` 为所属工作表；``row`` 为 0-based 行索引。
+    返回：该行在 96 DPI 下的像素高度；隐藏行返回 ``0``。
+    """
+    dimension = worksheet._rows.get(row)
+    if dimension is not None and dimension.hidden:
+        return 0
+    points = 15.0 if dimension is None or dimension.height is None else dimension.height
+    return max(1, int(round(points * 96 / 72)))
+
+
+def _image_area_pixels(image: object) -> tuple[int, int]:
+    """功能：计算图片锚定矩形的近似像素尺寸。
+
+    使用方法：由 ``drawing_xml`` 计算等比填充策略时内部调用。
+    参数：``image`` 为带有 ``worksheet`` 和 ``bounds`` 属性的图片对象。
+    返回：``(宽度, 高度)`` 像素元组，最小值为 1。
+    """
+    worksheet = image.worksheet
+    min_row, min_column, max_row, max_column = image.bounds
+    width = sum(_column_pixel_width(worksheet, index) for index in range(min_column, max_column + 1))
+    height = sum(_row_pixel_height(worksheet, index) for index in range(min_row, max_row + 1))
+    return max(1, width), max(1, height)
+
+
+def _marker(
+    parent: ET.Element,
+    name: str,
+    row: int,
+    column: int,
+    row_offset: int = 0,
+    column_offset: int = 0,
+) -> ET.Element:
+    """功能：向 DrawingML 锚点写入一个行列标记。
+
+    使用方法：由图片和图表锚点生成器内部调用。
+    参数：``parent`` 为锚点元素；``name`` 为 ``from`` 或 ``to``；``row``、
+    ``column`` 为 0-based 标记坐标；偏移量以 EMU 为单位，可为负数以表示区域内边距。
+    返回：新建的标记 XML 元素。
+    """
+    result = ET.SubElement(parent, _qname(_SPREADSHEET_DRAWING_NS, name))
+    ET.SubElement(result, _qname(_SPREADSHEET_DRAWING_NS, "col")).text = str(column)
+    ET.SubElement(result, _qname(_SPREADSHEET_DRAWING_NS, "colOff")).text = str(column_offset)
+    ET.SubElement(result, _qname(_SPREADSHEET_DRAWING_NS, "row")).text = str(row)
+    ET.SubElement(result, _qname(_SPREADSHEET_DRAWING_NS, "rowOff")).text = str(row_offset)
+    return result
+
+
+def _picture_xml(
+    anchor: ET.Element,
+    image: object,
+    relationship_id: int,
+    object_id: int,
+    *,
+    crop: tuple[int, int, int, int] | None = None,
+) -> None:
+    """功能：向图片锚点追加标准图片元素。
+
+    使用方法：由 ``drawing_xml`` 内部调用。
+    参数：``anchor`` 为图片父锚点；``image`` 为图片对象；``relationship_id`` 和
+    ``object_id`` 为当前 DrawingML 部件内的编号；``crop`` 为万分比裁剪
+    ``(left, top, right, bottom)``，省略表示不裁剪。
+    返回：``None``；图片 XML 直接追加到 ``anchor``。
+    """
+    picture = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "pic"))
+    non_visual = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "nvPicPr"))
+    ET.SubElement(
+        non_visual,
+        _qname(_SPREADSHEET_DRAWING_NS, "cNvPr"),
+        {"id": str(object_id), "name": f"图片 {object_id}", "descr": image.alt_text},
+    )
+    ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPicPr"))
+    blip_fill = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "blipFill"))
+    ET.SubElement(
+        blip_fill,
+        _qname(_DRAWING_NS, "blip"),
+        {_qname(_REL_NS, "embed"): f"rId{relationship_id}"},
+    )
+    if crop is not None and any(crop):
+        ET.SubElement(
+            blip_fill,
+            _qname(_DRAWING_NS, "srcRect"),
+            {name: str(value) for name, value in zip(("l", "t", "r", "b"), crop) if value},
+        )
+    stretch = ET.SubElement(blip_fill, _qname(_DRAWING_NS, "stretch"))
+    ET.SubElement(stretch, _qname(_DRAWING_NS, "fillRect"))
+    shape_properties = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "spPr"))
+    transform = ET.SubElement(shape_properties, _qname(_DRAWING_NS, "xfrm"))
+    ET.SubElement(transform, _qname(_DRAWING_NS, "off"), {"x": "0", "y": "0"})
+    ET.SubElement(
+        transform,
+        _qname(_DRAWING_NS, "ext"),
+        {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)},
+    )
+    geometry = ET.SubElement(
+        shape_properties, _qname(_DRAWING_NS, "prstGeom"), {"prst": "rect"}
+    )
+    ET.SubElement(geometry, _qname(_DRAWING_NS, "avLst"))
+
+
+def _cover_crop(image: object, area_width: int, area_height: int) -> tuple[int, int, int, int]:
+    """功能：计算 COVER 等比铺满所需的中心裁剪比例。
+
+    使用方法：由 ``drawing_xml`` 内部调用。
+    参数：``image`` 为含原始宽高的图片；``area_width``、``area_height`` 为目标
+    区域像素尺寸。
+    返回：左、上、右、下四边的万分比裁剪值，范围为 0～100000。
+    """
+    source_ratio = image.width / image.height
+    area_ratio = area_width / area_height
+    if source_ratio > area_ratio:
+        crop = int(round((1 - area_ratio / source_ratio) * 50000))
+        return crop, 0, crop, 0
+    crop = int(round((1 - source_ratio / area_ratio) * 50000))
+    return 0, crop, 0, crop
+
+
 def drawing_xml(
     images: Sequence[tuple[int, object]], charts: Sequence[tuple[int, object]]
 ) -> bytes:
@@ -681,35 +817,55 @@ def drawing_xml(
 
     使用方法：XLSX 打包器为包含图片或图表的工作表调用。
     参数：``images`` 为 ``(全局图片编号, Image)`` 序列；``charts`` 为
-    ``(全局图表编号, Chart)`` 序列。
+    ``(全局图表编号, Chart)`` 序列。CELL 图片使用 ``twoCellAnchor``，FLOATING
+    图片保留 ``oneCellAnchor``；CONTAIN/COVER 的几何策略会写入自定义 ``ek:fit``
+    属性，便于 ExcelKit 读回。
     返回：可写入 ``xl/drawings/drawingN.xml`` 的 XML 字节串。
     """
     root = ET.Element(_qname(_SPREADSHEET_DRAWING_NS, "wsDr"))
     relationship_id = 1
     object_id = 1
-    for image_id, image in images:
-        row, column = cell_index(image.anchor)
-        anchor = ET.SubElement(root, _qname(_SPREADSHEET_DRAWING_NS, "oneCellAnchor"))
-        start = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "from"))
-        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "col")).text = str(column)
-        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "colOff")).text = str(int(image.offset_x) * 9525)
-        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "row")).text = str(row)
-        ET.SubElement(start, _qname(_SPREADSHEET_DRAWING_NS, "rowOff")).text = str(int(image.offset_y) * 9525)
-        ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "ext"), {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)})
-        picture = ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "pic"))
-        non_visual = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "nvPicPr"))
-        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPr"), {"id": str(object_id), "name": f"图片 {object_id}", "descr": image.alt_text})
-        ET.SubElement(non_visual, _qname(_SPREADSHEET_DRAWING_NS, "cNvPicPr"))
-        blip_fill = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "blipFill"))
-        ET.SubElement(blip_fill, _qname(_DRAWING_NS, "blip"), {_qname(_REL_NS, "embed"): f"rId{relationship_id}"})
-        stretch = ET.SubElement(blip_fill, _qname(_DRAWING_NS, "stretch"))
-        ET.SubElement(stretch, _qname(_DRAWING_NS, "fillRect"))
-        shape_properties = ET.SubElement(picture, _qname(_SPREADSHEET_DRAWING_NS, "spPr"))
-        transform = ET.SubElement(shape_properties, _qname(_DRAWING_NS, "xfrm"))
-        ET.SubElement(transform, _qname(_DRAWING_NS, "off"), {"x": "0", "y": "0"})
-        ET.SubElement(transform, _qname(_DRAWING_NS, "ext"), {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)})
-        geometry = ET.SubElement(shape_properties, _qname(_DRAWING_NS, "prstGeom"), {"prst": "rect"})
-        ET.SubElement(geometry, _qname(_DRAWING_NS, "avLst"))
+    for _image_id, image in images:
+        if image.placement == "cell":
+            min_row, min_column, max_row, max_column = image.bounds
+            area_width, area_height = _image_area_pixels(image)
+            from_col_offset = int(image.offset_x) * 9525
+            from_row_offset = int(image.offset_y) * 9525
+            to_col_offset = 0
+            to_row_offset = 0
+            if image.fit == "contain":
+                scale = min(area_width / image.width, area_height / image.height)
+                rendered_width = max(1, int(round(image.width * scale)))
+                rendered_height = max(1, int(round(image.height * scale)))
+                from_col_offset += int(round((area_width - rendered_width) / 2)) * 9525
+                from_row_offset += int(round((area_height - rendered_height) / 2)) * 9525
+                to_col_offset = -int(round((area_width - rendered_width) / 2)) * 9525
+                to_row_offset = -int(round((area_height - rendered_height) / 2)) * 9525
+            attributes = {_qname(_EXCELKIT_NS, "fit"): image.fit}
+            anchor = ET.SubElement(
+                root, _qname(_SPREADSHEET_DRAWING_NS, "twoCellAnchor"), attributes
+            )
+            _marker(anchor, "from", min_row, min_column, from_row_offset, from_col_offset)
+            _marker(
+                anchor,
+                "to",
+                max_row + 1,
+                max_column + 1,
+                to_row_offset,
+                to_col_offset,
+            )
+            crop = _cover_crop(image, area_width, area_height) if image.fit == "cover" else None
+        else:
+            row, column = cell_index(image.anchor)
+            anchor = ET.SubElement(root, _qname(_SPREADSHEET_DRAWING_NS, "oneCellAnchor"))
+            _marker(anchor, "from", row, column, int(image.offset_y) * 9525, int(image.offset_x) * 9525)
+            ET.SubElement(
+                anchor,
+                _qname(_SPREADSHEET_DRAWING_NS, "ext"),
+                {"cx": str(int(image.width) * 9525), "cy": str(int(image.height) * 9525)},
+            )
+            crop = None
+        _picture_xml(anchor, image, relationship_id, object_id, crop=crop)
         ET.SubElement(anchor, _qname(_SPREADSHEET_DRAWING_NS, "clientData"))
         relationship_id += 1
         object_id += 1

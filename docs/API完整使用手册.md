@@ -1,6 +1,6 @@
-# ExcelKit 0.9.0 完整中文使用与 API 手册
+# ExcelKit 0.10.0 完整中文使用与 API 手册
 
-版本：0.9.0
+版本：0.10.0
 适用对象：ExcelKit 使用者、二次开发者和维护者
 
 ## 目录
@@ -8,7 +8,7 @@
 - [1. 安装与导入](#1-安装与导入)
 - [2. 必须先了解的索引规则](#2-必须先了解的索引规则)
 - [3. 顶层版本 API](#3-顶层版本-api)
-  - [3.1 0.5.0 至 0.9.0 新增功能速查](#31-050-至-090-新增功能速查)
+  - [3.1 0.5.0 至 0.10.0 新增功能速查](#31-050-至-0100-新增功能速查)
 - [4. Workbook 工作簿](#4-workbook-工作簿)
 - [5. Worksheet 工作表](#5-worksheet-工作表)
 - [6. Cell 单元格](#6-cell-单元格)
@@ -26,16 +26,17 @@
   - [15.3 数据查找、替换与文本导出 API](#153-070-数据查找替换与文本导出-api)
   - [15.4 业务报表生产力 API](#154-082-业务报表生产力-api)
   - [15.5 0.9.0 数据校验与公式 API](#155-090-数据校验与公式-api)
-- [16. 0.9.0 能力边界](#16-090-能力边界)
+- [16. 0.10.0 能力边界](#16-0100-能力边界)
 - [17. API 选择指南](#17-api-选择指南)
-- [18. 0.9.0 API 速查表](#18-090-api-速查表)
+- [18. 0.10.0 API 速查表](#18-0100-api-速查表)
+- 旧版目录兼容链接： [18. 0.9.0 API 速查表](#18-090-api-速查表)
 
 ## 1. 安装与导入
 
 安装 wheel：
 
 ```bash
-pip install excelkit-0.9.0-py3-none-any.whl
+pip install excelkit-0.10.0-py3-none-any.whl
 ```
 
 核心对象从顶层导入：
@@ -62,7 +63,7 @@ from excelkit.table import TotalFunction
 from excelkit.filter import AutoFilter
 from excelkit.protection import Protection
 from excelkit.chart import Chart, ChartLegend, ChartSeries, ChartType
-from excelkit.image import Image
+from excelkit import Image, ImageFit, ImagePlacement
 from excelkit.note import Note
 from excelkit.sort import SortKey
 ```
@@ -90,7 +91,7 @@ A1 字符串是 Excel 文件格式的原生表示，仍从 `A1` 开始。转换�
 `MAX_ROW = 1048576` 和 `MAX_COLUMN = 16384` 表示可用数量，不是最大索引。
 合法最大索引分别为 `1048575` 和 `16383`。
 
-## 3.1 0.5.0 至 0.9.0 新增功能速查
+## 3.1 0.5.0 至 0.10.0 新增功能速查
 
 ### 读取 CSV/TSV
 
@@ -121,6 +122,22 @@ from excelkit.hyperlink import Hyperlink
 ws["A1"].hyperlink = "https://example.com"
 ws["A2"].hyperlink = Hyperlink(location="统计!A1", display="跳转")
 ```
+
+### 图片单元格锚定
+
+```python
+from excelkit import ImageFit, ImagePlacement
+
+ws.add_image(
+    "logo.png",
+    anchor="B2:F8",
+    placement=ImagePlacement.CELL,
+    fit=ImageFit.COVER,
+)
+```
+
+`ImagePlacement.CELL` 使用标准 `twoCellAnchor`，在 Excel 中调整行高或列宽时图片会
+随区域改变；`ImagePlacement.FLOATING` 保持旧版按像素尺寸定位的 `oneCellAnchor`。
 
 ### 文档属性和保护
 
@@ -171,7 +188,7 @@ ws.auto_filter.set(1, ["通过"])
 ```python
 import excelkit
 
-assert excelkit.__version__ == "0.9.0"
+assert excelkit.__version__ == "0.10.0"
 ```
 
 ## 4. Workbook 工作簿
@@ -2428,6 +2445,7 @@ assert list(store.items()) == [((0, 0), "A1")]
 - `16_search_replace_and_export.py`：查找、替换、清除超链接/批注和 CSV 导出。
 - `17_visual_sort_filter.py`：图表、图片、传统批注、排序、筛选与工作表可见性。
 - `18_business_report.py`：字典记录、Table、批量公式、自动填充、条件格式、汇总和打印分页。
+- `19_images.py`：图片单元格/区域锚定、填充策略和图片查询。
 - `create_excel.py`：组合示例。
 
 在项目根目录执行，例如：
@@ -2562,24 +2580,41 @@ chart.add_series(values="B2:B13", categories="A2:A13", name="销售额")
 方法返回当前 `Chart`。`Chart.remove()` 删除图表并返回所属工作表。图例位置可使用
 `ChartLegend.BOTTOM`、`TOP`、`LEFT`、`RIGHT`、`NONE`。
 
-### `Worksheet.add_image(filename, *, anchor)` / `images`
+### `Worksheet.add_image(source, *, anchor, name=None, placement=..., fit=...)` / `images` / `image`
 
-功能：在工作表中添加 PNG 或 JPEG 图片。`filename` 是现有字符串或 `PathLike` 图片路径，`anchor` 是图片
-左上角的单个 A1 地址；返回 `Image`，`images` 返回只读元组。图片尺寸由原文件像素
-自动读取，随后可修改 `width`、`height`、`offset_x`、`offset_y` 和 `alt_text`；前四项
-均为像素。`Image.remove()` 删除图片并返回所属工作表。
+功能：在工作表中添加 PNG 或 JPEG 图片。`source` 是图片路径或二进制内容，二进制内容
+需要通过 `name` 提供文件名；`anchor` 支持单格（如 `B2`）或闭区间矩形（如
+`B2:F8`）。默认 `ImagePlacement.FLOATING` 使用像素尺寸的浮动锚点；使用
+`ImagePlacement.CELL` 可让图片随锚点区域移动并缩放。`fit` 仅对 CELL 有意义：
+`ImageFit.STRETCH` 拉伸铺满，`CONTAIN` 等比完整显示，`COVER` 等比铺满并裁剪。
+返回 `Image`，`images` 返回按添加顺序排列的只读元组，`image(anchor_or_index)`
+可按地址或 0-based 图片序号查询。图片尺寸由原文件像素自动读取，随后可修改
+`width`、`height`、`offset_x`、`offset_y` 和 `alt_text`；前四项均为像素。
+`Image.remove()` 删除图片并返回所属工作表。
 
 ```python
+from excelkit import ImageFit, ImagePlacement
+
 image = worksheet.add_image("logo.png", anchor="A1")
 image.width = 160
 image.height = 80
 image.offset_x = 8
 image.offset_y = 6
 image.alt_text = "公司 Logo"
+
+cell_image = worksheet.add_image(
+    "logo.png", anchor="B2:F8",
+    placement=ImagePlacement.CELL,
+    fit=ImageFit.CONTAIN,
+)
+assert worksheet.image("B2") is cell_image
+assert worksheet.image(0) is image
 ```
 
-图表和图片当前写入 XLSX；加载已有 XLSX 时不会重建为 ExcelKit 对象，保存后也不会
-保留从外部文件读取到、但未由 ExcelKit 创建的图表或图片。`.xls` 不支持它们。
+图表和图片当前写入 XLSX；加载已有 XLSX 时会重建标准 DrawingML 中的 PNG/JPEG
+图片及其锚点、尺寸和替代文本。ExcelKit 自定义的 `fit` 元数据可在本库生成的文件
+中恢复；第三方软件删除该扩展属性时，读回默认为 `ImageFit.STRETCH`。`.xls` 写出
+不支持 `ImagePlacement.CELL`，此时请改用 `.xlsx`；XLS 读取不会恢复图片。
 
 ### `Cell.note`
 
@@ -3040,11 +3075,15 @@ ws["D5"].formula = '=TEXT(1234.5,"#,##0.00")'
 wb.calculate(strict=True)
 ```
 
-## 16. 0.9.0 能力边界
+## 16. 0.10.0 能力边界
 
-0.8.2 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
-公式表达式恢复、页眉页脚图片、图表和图片的读回/保留、
-宏对象模型或流式大文件处理。基础 Table 和命名区域仅在 XLSX 中保留定义。
+0.10.0 不提供模板循环嵌套、完整 Excel 公式函数集、结构化 Table 引用计算、XLS
+公式表达式恢复、页眉页脚图片、图表读回、宏对象模型或流式大文件处理。标准
+DrawingML PNG/JPEG 图片支持 XLSX 写入和读回；图片的 COVER/CONTAIN 几何是写出时
+按行高列宽近似计算的布局策略，第三方软件移除 ExcelKit 扩展属性后读回将默认为
+STRETCH。
+基础 Table 和命名区域仅在 XLSX 中保留定义；XLS 不支持 CELL 图片锚定，也不会
+恢复图片。
 
 模板循环展开会复制单元格值、公式和样式，但不会自动移动或扩张模板中已有的合并
 区域、冻结位置、筛选范围和打印区域。需要动态结构时，应在渲染后通过对应 0.8.2
@@ -3085,12 +3124,14 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 `append_many()`、`fit_width` 或 `fit_height` 等重复或纯循环包装入口。相同能力只保留
 一处明确实现。
 
-## 18. 0.9.0 API 速查表
+<a id="18-090-api-速查表"></a>
+
+## 18. 0.10.0 API 速查表
 
 | 对象/模块 | 稳定公开 API |
 |---|---|
 | `Workbook` | `add_sheet`、`sheet`、`remove_sheet`、`move_sheet`、`copy_sheet`、`add_named_range`、`named_range`、`named_ranges`、`remove_named_range`、`sheets`、`active`、`properties`、`protection`、`load`、`render`、`calculate`、`save`、`len()` |
-| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`to_records`、`auto_fit_columns`、`auto_fit_rows`、`group_rows`、`ungroup_rows`、`group_columns`、`ungroup_columns`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`hyperlinks`、`add_validation`、`validations`、`remove_validation`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`remove_conditional_format`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
+| `Worksheet` | `name`、`color`、`visibility`、`cell`、`range`、`row`、`column`、`merged_ranges`、`freeze_panes`、`auto_filter`、`sort`、`find`、`replace`、`export`、`write_records`、`write_table`、`to_records`、`auto_fit_columns`、`auto_fit_rows`、`group_rows`、`ungroup_rows`、`group_columns`、`ungroup_columns`、`horizontal_page_breaks`、`add_horizontal_page_break`、`remove_horizontal_page_break`、`show_gridlines`、`page`、`protection`、`add_chart`、`charts`、`add_image`、`images`、`image`、`hyperlinks`、`add_validation`、`validations`、`remove_validation`、`add_conditional_format`、`add_color_scale`、`add_data_bar`、`add_icon_set`、`conditional_formats`、`remove_conditional_format`、`insert_rows`、`delete_rows`、`insert_columns`、`delete_columns`、`add_table`、`table`、`tables`、`remove_table`、`max_row`、`max_column`、`values`、`headers`、`append`、`append_rows`、`[]` |
 | `Cell` | `row`、`column`、`index`、`address`、`value`、`formula`、`formula_status`、`calculation_error`、`dependencies`、`dependents`、`hyperlink`、`note`、`style`、`copy_style`、`set_value`、`read`、六种 `as_*` |
 | `CellValue` | `value`、`as_string`、`as_int`、`as_float`、`as_bool`、`as_date`、`as_datetime` |
 | `Range` | `worksheet`、四个 0-based 边界、`address`、`values`、`to_records`、`set_values`、`format.number`、`apply_style`、`auto_fill`、`remove_duplicates`、`remove_blank_rows`、`clear`、`copy_to`、`merge`、`unmerge` |
@@ -3109,7 +3150,7 @@ XLSM 中的宏只会被忽略，不会执行；保存为其他文件时不会保
 | `excelkit.filter` | `AutoFilter` |
 | `excelkit.protection` | `Protection` |
 | `excelkit.chart` | `Chart`、`ChartSeries`、`ChartLegend`、`ChartType` |
-| `excelkit.image` | `Image` |
+| `excelkit.image` | `Image`、`ImageFit`、`ImagePlacement`（同时可从 `excelkit` 顶层导入） |
 | `excelkit.note` | `Note` |
 | `excelkit.sort` | `SortKey` |
 

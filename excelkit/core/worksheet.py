@@ -35,7 +35,7 @@ from ..filter import AutoFilter
 from ..note import Note
 from ..sort import SortKey
 from ..chart import Chart, ChartType
-from ..image import Image
+from ..image import Image, ImageFit, ImagePlacement
 
 if TYPE_CHECKING:
     from .workbook import Workbook
@@ -900,21 +900,42 @@ class Worksheet:
         *,
         anchor: str,
         name: str | None = None,
+        placement: str = ImagePlacement.FLOATING,
+        fit: str = ImageFit.STRETCH,
     ) -> Image:
         """功能：在当前工作表添加 PNG 或 JPEG 图片。
 
         使用方法：``image = ws.add_image('logo.png', anchor='A1')``；内存二维码可用
-        ``ws.add_image(payload, anchor='A1', name='qrcode.png')``。
+        ``ws.add_image(payload, anchor='A1', name='qrcode.png')``；需要图片随区域
+        缩放时使用 ``ws.add_image('logo.png', anchor='B2:F8',
+        placement=ImagePlacement.CELL, fit=ImageFit.CONTAIN)``。
         参数：``source`` 为字符串、``PathLike`` 图片路径或 PNG/JPEG ``bytes``；
-        ``anchor`` 为左上角单个 A1 地址；二进制图片需要 ``name`` 提供文件名。
+        ``anchor`` 为单个 A1 地址或包含首尾单元格的矩形区域；二进制图片需要
+        ``name`` 提供文件名；``placement`` 为 ``ImagePlacement.FLOATING``（默认，
+        固定像素尺寸）或 ``ImagePlacement.CELL``（随锚点区域移动并缩放）；``fit``
+        为 ``ImageFit.STRETCH``、``CONTAIN`` 或 ``COVER``，分别表示拉伸、等比完整
+        显示和等比铺满裁剪。
         返回：新建 ``Image``；其 ``width``、``height`` 为像素，``offset_x``、
-        ``offset_y`` 为像素偏移，均可在保存前修改。
+        ``offset_y`` 为像素偏移，均可在保存前修改；图片按添加顺序保存在
+        ``worksheet.images`` 中。
         异常：路径、格式或锚点无效时抛出文件系统异常、``TypeError`` 或 ``ValueError``。
         """
         if not isinstance(source, (str, os.PathLike, bytes)):
             raise TypeError("source 必须是字符串、PathLike 图片路径或 bytes")
-        row, column = cell_index(anchor)
-        image = Image(self, source, cell_address(row, column), name=name)
+        try:
+            bounds = range_index(anchor)
+        except ValueError:
+            row, column = cell_index(anchor)
+            bounds = (row, column, row, column)
+        canonical = range_address(*bounds)
+        image = Image(
+            self,
+            source,
+            canonical,
+            name=name,
+            placement=placement,
+            fit=fit,
+        )
         self._images.append(image)
         return image
 
@@ -927,6 +948,42 @@ class Worksheet:
         返回：按添加顺序排列的 ``tuple[Image, ...]``，不可直接修改。
         """
         return tuple(self._images)
+
+    def image(self, anchor_or_index: str | int) -> Image:
+        """功能：按锚点地址或添加顺序取得一张图片。
+
+        使用方法：``image = worksheet.image('B2:F8')``；也可用
+        ``image = worksheet.image(0)`` 取得第一张图片。字符串会先规范化为
+        A1 单格或矩形区域，并与图片的完整 ``anchor`` 匹配；查询区域锚点的左上角
+        单元格（例如图片锚点为 ``B2:F8`` 时查询 ``B2``）也可以命中。
+        参数：``anchor_or_index`` 为单格/区域 A1 字符串，或图片添加顺序的
+        0-based 非负整数；布尔值不作为索引。
+        返回：匹配到的 ``Image`` 对象；同一锚点有多张图片时返回最早添加者。
+        异常：地址不存在时抛出 ``KeyError``；整数索引无效时抛出 ``IndexError``；
+        参数类型无效时抛出 ``TypeError``。
+        """
+        if isinstance(anchor_or_index, bool):
+            raise TypeError("图片索引必须是0-based整数或 A1 地址")
+        if isinstance(anchor_or_index, int):
+            if anchor_or_index < 0 or anchor_or_index >= len(self._images):
+                raise IndexError("图片索引超出范围")
+            return self._images[anchor_or_index]
+        if not isinstance(anchor_or_index, str):
+            raise TypeError("图片查询参数必须是0-based整数或 A1 地址")
+        try:
+            try:
+                query_bounds = range_index(anchor_or_index)
+            except ValueError:
+                row, column = cell_index(anchor_or_index)
+                query_bounds = (row, column, row, column)
+            query = range_address(*query_bounds)
+        except (TypeError, ValueError) as error:
+            raise KeyError(anchor_or_index) from error
+        query_top_left = query_bounds[:2]
+        for item in self._images:
+            if item.anchor.casefold() == query.casefold() or item.bounds[:2] == query_top_left:
+                return item
+        raise KeyError(anchor_or_index)
 
     def _remove_image(self, image: Image) -> None:
         """功能：删除当前工作表持有的图片对象。
@@ -1083,10 +1140,14 @@ class Worksheet:
             coordinates.update({(min_row, min_column), (max_row, max_column)})
         for item in (*self._charts, *self._images):
             try:
-                row, column = cell_index(item.anchor)
+                bounds = range_index(item.anchor)
             except (TypeError, ValueError):
-                continue
-            coordinates.add((row, column))
+                try:
+                    row, column = cell_index(item.anchor)
+                    bounds = (row, column, row, column)
+                except (TypeError, ValueError):
+                    continue
+            coordinates.update({(bounds[0], bounds[1]), (bounds[2], bounds[3])})
         if not coordinates:
             return None
         rows = [item[0] for item in coordinates]
@@ -1981,6 +2042,16 @@ class Worksheet:
                 item.range = range_address(*mapped)
                 mapped_conditionals.append(item)
         self._conditionals = mapped_conditionals
+        mapped_images = []
+        for image in self._images:
+            mapped = self._map_bounds(
+                image.bounds, index, count, rows=rows, deleting=deleting
+            )
+            if mapped is None:
+                continue
+            image.anchor = range_address(*mapped)
+            mapped_images.append(image)
+        self._images = mapped_images
         if self._freeze is not None:
             freeze_row, freeze_column = cell_index(self._freeze)
             mapped = self._map_index(freeze_row if rows else freeze_column, index, count, deleting=deleting)

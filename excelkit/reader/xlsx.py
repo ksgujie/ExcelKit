@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Sequence, Set, Type, TypeVar
 
-from ..address import cell_address, cell_index, column_to_index, range_index
+from ..address import cell_address, cell_index, column_to_index, range_address, range_index
 from ..core.page import HeaderFooter, PageMargins
 from ..errors import InvalidFileError
 from ..properties import WorkbookProperties
@@ -31,6 +31,9 @@ _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _CORE_PROPERTIES_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
 _DCTERMS_NS = "http://purl.org/dc/terms/"
 _DC_NS = "http://purl.org/dc/elements/1.1/"
+_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_SPREADSHEET_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+_EXCELKIT_NS = "https://github.com/ksgujie/ExcelKit"
 _INTEGER_PATTERN = re.compile(r"^[+-]?\d+$")
 _ABSOLUTE_AREA_PATTERN = re.compile(
     r"\$([A-Za-z]{1,3})\$(\d+):\$([A-Za-z]{1,3})\$(\d+)"
@@ -631,6 +634,7 @@ def _load_sheet(
     _load_sheet_layout(root, worksheet, dxf_colors)
     _load_sheet_hyperlinks(package, member, root, worksheet)
     _load_sheet_notes(package, member, worksheet)
+    _load_sheet_images(package, member, root, worksheet)
     _load_sheet_tables(package, member, root, worksheet)
 
 
@@ -762,6 +766,131 @@ def _load_sheet_notes(
         if isinstance(error, InvalidFileError):
             raise
         raise InvalidFileError("工作表批注定义无效") from error
+
+
+def _drawing_marker(anchor: ET.Element, name: str) -> tuple[int, int, int, int]:
+    """功能：读取 DrawingML 锚点中的行列标记和偏移。
+
+    使用方法：由图片读取器解析 ``from``、``to`` 元素时内部调用。
+    参数：``anchor`` 为图片锚点元素；``name`` 为标记名称。
+    返回：``(行索引, 列索引, 行偏移EMU, 列偏移EMU)``，行列索引均为0-based。
+    异常：标记缺失或数值无效时抛出 ``InvalidFileError``。
+    """
+    marker = anchor.find(_tag(_SPREADSHEET_DRAWING_NS, name))
+    if marker is None:
+        raise InvalidFileError(f"图片锚点缺少 {name} 标记")
+    try:
+        row = int(marker.findtext(_tag(_SPREADSHEET_DRAWING_NS, "row"), "-1"))
+        column = int(marker.findtext(_tag(_SPREADSHEET_DRAWING_NS, "col"), "-1"))
+        row_offset = int(marker.findtext(_tag(_SPREADSHEET_DRAWING_NS, "rowOff"), "0"))
+        column_offset = int(marker.findtext(_tag(_SPREADSHEET_DRAWING_NS, "colOff"), "0"))
+    except ValueError as error:
+        raise InvalidFileError("图片锚点行列标记不是整数") from error
+    if row < 0 or column < 0:
+        raise InvalidFileError("图片锚点行列标记不能为负数")
+    return row, column, row_offset, column_offset
+
+
+def _load_sheet_images(
+    package: zipfile.ZipFile,
+    member: str,
+    root: ET.Element,
+    worksheet: "Worksheet",
+) -> None:
+    """功能：读取工作表 DrawingML 中的嵌入 PNG/JPEG 图片。
+
+    使用方法：由单张工作表读取流程自动调用，业务代码无需直接调用。
+    参数：``package`` 为已打开的 XLSX ZIP 包；``member`` 为工作表部件路径；
+    ``root`` 为工作表 XML 根元素；``worksheet`` 为接收图片的工作表。
+    返回：``None``；图片对象按 DrawingML 顺序追加到 ``worksheet.images``。
+    异常：关系、媒体、锚点或图片内容损坏时抛出 ``InvalidFileError``；不支持的
+    图表和绝对锚点会被忽略，不影响其它单元格数据读取。
+    """
+    drawing_element = root.find(_tag(_MAIN_NS, "drawing"))
+    if drawing_element is None:
+        return
+    relationship_id = drawing_element.get(_tag(_REL_NS, "id"))
+    if not relationship_id:
+        raise InvalidFileError("工作表 drawing 缺少关系编号")
+    sheet_relationships = _sheet_relationships(package, member)
+    drawing_relation = sheet_relationships.get(relationship_id)
+    if drawing_relation is None or not drawing_relation[0].endswith("/drawing"):
+        raise InvalidFileError("工作表 drawing 关系缺失或类型错误")
+    drawing_member = drawing_relation[1]
+    drawing_relationships = _sheet_relationships(package, drawing_member)
+    try:
+        drawing_root = _read_xml(package, drawing_member)
+    except InvalidFileError:
+        raise
+    from ..image import Image, ImageFit, ImagePlacement
+
+    image_relationships = {
+        key: target
+        for key, (relationship_type, target) in drawing_relationships.items()
+        if relationship_type.endswith("/image")
+    }
+    if not image_relationships:
+        return
+    anchor_names = ("oneCellAnchor", "twoCellAnchor")
+    for anchor_name in anchor_names:
+        for anchor in drawing_root.findall(_tag(_SPREADSHEET_DRAWING_NS, anchor_name)):
+            picture = anchor.find(_tag(_SPREADSHEET_DRAWING_NS, "pic"))
+            if picture is None:
+                continue
+            blip = picture.find(
+                f".//{_tag(_DRAWING_NS, 'blip')}"
+            )
+            if blip is None:
+                continue
+            embedded_id = blip.get(_tag(_REL_NS, "embed"))
+            target = image_relationships.get(embedded_id or "")
+            if target is None or target not in package.namelist() or not target.startswith("xl/media/"):
+                raise InvalidFileError("图片媒体关系缺失或目标非法")
+            try:
+                from_row, from_column, from_row_offset, from_column_offset = _drawing_marker(anchor, "from")
+                if anchor_name == "twoCellAnchor":
+                    to_row, to_column, _to_row_offset, _to_column_offset = _drawing_marker(anchor, "to")
+                    if to_row <= from_row or to_column <= from_column:
+                        raise InvalidFileError("twoCellAnchor 的终点必须位于起点右下方")
+                    bounds = (from_row, from_column, to_row - 1, to_column - 1)
+                    placement = ImagePlacement.CELL
+                else:
+                    bounds = (from_row, from_column, from_row, from_column)
+                    placement = ImagePlacement.FLOATING
+                address = range_address(*bounds)
+                image = Image(
+                    worksheet,
+                    package.read(target),
+                    anchor=address,
+                    name=Path(target).name,
+                    placement=placement,
+                    fit=ImageFit.STRETCH,
+                )
+                if anchor_name == "twoCellAnchor":
+                    fit_value = anchor.get(_tag(_EXCELKIT_NS, "fit"))
+                    if fit_value in {ImageFit.STRETCH, ImageFit.CONTAIN, ImageFit.COVER}:
+                        image.fit = fit_value
+                else:
+                    ext = anchor.find(_tag(_SPREADSHEET_DRAWING_NS, "ext"))
+                    if ext is not None:
+                        width = int(ext.get("cx", "0")) // 9525
+                        height = int(ext.get("cy", "0")) // 9525
+                        if width > 0:
+                            image.width = width
+                        if height > 0:
+                            image.height = height
+                image.offset_x = int(round(from_column_offset / 9525))
+                image.offset_y = int(round(from_row_offset / 9525))
+                c_nv_pr = picture.find(
+                    f".//{_tag(_SPREADSHEET_DRAWING_NS, 'cNvPr')}"
+                )
+                if c_nv_pr is not None and c_nv_pr.get("descr"):
+                    image.alt_text = c_nv_pr.get("descr") or ""
+                worksheet._images.append(image)
+            except (OSError, TypeError, ValueError, KeyError) as error:
+                if isinstance(error, InvalidFileError):
+                    raise
+                raise InvalidFileError("DrawingML 图片定义无效") from error
 
 
 def _load_sheet_tables(

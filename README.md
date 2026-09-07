@@ -1,14 +1,14 @@
-# ExcelKit 0.9.0
+# ExcelKit 0.10.0
 
 ExcelKit 是一个使用清晰对象模型读写 XLSX、XLS、CSV 与 TSV 文件的轻量级库。
 
 逐项参数、返回值、异常及示例请参阅
-[《ExcelKit 0.9.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
+[《ExcelKit 0.10.0 完整中文使用与 API 手册》](docs/API完整使用手册.md)。
 
 ## 安装
 
 ```bash
-pip install excelkit-0.9.0-py3-none-any.whl
+pip install excelkit-0.10.0-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -90,7 +90,8 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
 - `sort(address, *, keys, has_header=False)`：按 `SortKey` 对连续区域排序。
 - `visibility`：使用 `Worksheet.VISIBLE`、`HIDDEN`、`VERY_HIDDEN` 控制可见状态。
 - `add_chart(chart_type, anchor=...)`、`charts`：创建柱状、条形、折线或饼图。
-- `add_image(filename, anchor=...)`、`images`：插入 PNG/JPEG 图片。
+- `add_image(filename, anchor=..., placement=..., fit=...)`、`images`、`image(...)`：
+  插入、查询 PNG/JPEG 图片；支持随单元格区域缩放和三种填充模式。
 - `cell.note`：读取、设置或清除传统单元格批注。
 - `find(query, ...)`、`replace(query, replacement, ...)`：在值或公式中查找、批量替换。
 - `export(filename, ...)`：导出当前工作表为 CSV/TSV。
@@ -100,7 +101,21 @@ A1 字符串仍遵循 Excel 原生表示，所以第一格写作 `A1`。`MAX_ROW
   `columns`、`resize()`、`append()`、`append_rows()`、`clear_data()` 和汇总行。
 - `table(name)`、`tables`、`remove_table(name)`：查询、枚举或删除本表数据表定义。
 
-## 0.9.0 新增
+## 0.10.0 新增
+
+图片支持单元格/区域锚定：
+
+```python
+from excelkit import Workbook, ImageFit, ImagePlacement
+
+worksheet = Workbook().active
+image = worksheet.add_image(
+    "logo.png", anchor="B2:F8",
+    placement=ImagePlacement.CELL,
+    fit=ImageFit.CONTAIN,
+)
+assert worksheet.image("B2") is image
+```
 
 ```python
 area = worksheet.used_range
@@ -502,8 +517,8 @@ API 手册。
 打印设置、普通值、类型转换、日期时间、公式保存与常用公式计算、公式缓存、区域
 批量操作、基础样式、命名区域、基础 Table、模板安全数值表达式、XLS/XLSX 读写及
 CSV/TSV 读写、超链接、传统批注、数据验证、条件格式、筛选条件、保护、文档属性、
-基础图表及 PNG/JPEG 图片写出。Python 公式计算器不是 Excel 全函数兼容引擎；本版本
-不包含从外部 XLSX 恢复图表或图片、结构化 Table 公式或流式读写。
+基础图表及 PNG/JPEG 图片写出与 XLSX 读回。Python 公式计算器不是 Excel 全函数兼容
+引擎；本版本不包含从外部 XLSX 恢复图表、结构化 Table 公式或流式读写。
 
 ## 开发验证
 

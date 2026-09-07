@@ -7,8 +7,9 @@ from .core import (
     Workbook,
     Worksheet,
 )
+from .image import Image, ImageFit, ImagePlacement
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "__version__",
@@ -17,4 +18,7 @@ __all__ = [
     "Cell",
     "CellValue",
     "Range",
+    "Image",
+    "ImageFit",
+    "ImagePlacement",
 ]
