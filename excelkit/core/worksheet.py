@@ -696,8 +696,111 @@ class Worksheet:
                     value = source_values.get((source_row, column))
                     if (source_row, column) in source_values:
                         mapping[(target_row, column)] = value
+        # 对合并区域、数据表、数据验证、条件格式、图片、图表的
+        # 行列坐标也做相同的重映射，避免排序后数据与定义失配。
+        self._remap_axis_objects(source_rows, first_row, first_row, area)
         self._workbook._invalidate_formula_caches()
         return self
+
+    def _remap_axis_objects(
+        self,
+        source_rows: list[int],
+        start: int,
+        first_row: int,
+        area: "Range",
+    ) -> None:
+        """功能：把排序涉及的行列区域级对象按新顺序重新映射坐标。
+
+        使用方法：由 :meth:`sort` 在搬移普通值与公式后内部调用。
+        参数：``source_rows`` 为按新顺序保留的绝对行索引；``start``
+        为排序区域首数据行；``first_row`` 为排序区域首行；
+        ``area`` 为排序区域边界。
+        返回：``None``；合并区域、数据表、验证、条件格式、图片、
+        图表的行列坐标随数据一同移动，超出边界的对象保持不变。
+        异常：当前区域与合并单元格相交时抛出 ``ValueError``。
+        """
+        if any(
+            not (b_max_row < area.min_row or b_min_row > area.max_row
+                 or b_max_column < area.min_column or b_min_column > area.max_column)
+            for b_min_row, b_min_column, b_max_row, b_max_column in self._merged_ranges
+        ):
+            raise ValueError("包含合并单元格的区域不能排序")
+        row_map = {source_row: target_row for target_row, source_row in
+                   enumerate(source_rows, start)}
+        # 合并区域重映射：只处理完全落在排序区域内的合并单元格。
+        remapped_merged = []
+        for bounds in self._merged_ranges:
+            min_row, min_column, max_row, max_column = bounds
+            if (first_row <= min_row <= max_row <= area.max_row
+                    and area.min_column <= min_column <= max_column <= area.max_column):
+                new_min = row_map[min_row]
+                new_max = row_map[max_row]
+                remapped_merged.append((new_min, min_column, new_max, max_column))
+            else:
+                remapped_merged.append(bounds)
+        self._merged_ranges = sorted(remapped_merged)
+        # 数据表边界重映射。
+        for table in self._tables.values():
+            t_min_row, t_min_column, t_max_row, t_max_column = table._bounds
+            if (first_row <= t_min_row <= t_max_row <= area.max_row
+                    and area.min_column <= t_min_column <= t_max_column <= area.max_column):
+                table._bounds = (
+                    row_map[t_min_row], t_min_column, row_map[t_max_row], t_max_column,
+                )
+                table._data_max_row = row_map.get(
+                    table._data_max_row, table._data_max_row
+                )
+        # 数据验证与条件格式范围重映射（不可变 dataclass，用 replace() 重建）。
+        from dataclasses import replace
+        remapped_validations = []
+        for item in self._validations:
+            v_min_row, v_min_column, v_max_row, v_max_column = range_index(item.range)
+            if (first_row <= v_min_row <= v_max_row <= area.max_row
+                    and area.min_column <= v_min_column <= v_max_column <= area.max_column):
+                remapped_validations.append(replace(
+                    item, range=range_address(
+                        row_map[v_min_row], v_min_column, row_map[v_max_row], v_max_column,
+                    ),
+                ))
+            else:
+                remapped_validations.append(item)
+        self._validations = remapped_validations
+        remapped_conditionals = []
+        for item in self._conditionals:
+            c_min_row, c_min_column, c_max_row, c_max_column = range_index(item.range)
+            if (first_row <= c_min_row <= c_max_row <= area.max_row
+                    and area.min_column <= c_min_column <= c_max_column <= area.max_column):
+                remapped_conditionals.append(replace(
+                    item, range=range_address(
+                        row_map[c_min_row], c_min_column, row_map[c_max_row], c_max_column,
+                    ),
+                ))
+            else:
+                remapped_conditionals.append(item)
+        self._conditionals = remapped_conditionals
+        # 图片锚点重映射。
+        remapped_images = []
+        for image in self._images:
+            i_min_row, i_min_column, i_max_row, i_max_column = image.bounds
+            if (first_row <= i_min_row <= i_max_row <= area.max_row
+                    and area.min_column <= i_min_column <= i_max_column <= area.max_column):
+                image.anchor = range_address(
+                    row_map[i_min_row], i_min_column, row_map[i_max_row], i_max_column,
+                )
+                remapped_images.append(image)
+            else:
+                remapped_images.append(image)
+        self._images = remapped_images
+        # 图表锚点只占单格，重映射其行坐标。
+        remapped_charts = []
+        for chart in self._charts:
+            c_row, c_column = cell_index(chart.anchor)
+            if first_row <= c_row <= area.max_row and area.min_column <= c_column <= area.max_column:
+                chart.anchor = cell_address(row_map[c_row], c_column)
+                remapped_charts.append(chart)
+            else:
+                remapped_charts.append(chart)
+        self._charts = remapped_charts
 
     @staticmethod
     def _matches_search(

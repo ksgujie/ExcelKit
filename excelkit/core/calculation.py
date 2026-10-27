@@ -738,8 +738,11 @@ class _Evaluator:
                 返回：名称不是工作簿命名区域或是函数调用时返回原文本；否则返回变量名。
                 """
                 name = match.group(1)
-                following = replaced[match.end():match.end() + 1]
-                if following == "(" or name.upper() in {"TRUE", "FALSE"}:
+                rest = replaced[match.end():]
+                # 函数名与左括号之间可能有空格（如 "SUM (A1)"），
+                # 去掉前导空白后若以 "(" 开头，则视为函数调用，
+                # 不应替换为命名区域。
+                if rest.lstrip().startswith("(") or name.upper() in {"TRUE", "FALSE"}:
                     return name
                 try:
                     named_range = self.workbook.named_range(name)

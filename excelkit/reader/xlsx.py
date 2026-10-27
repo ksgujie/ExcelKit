@@ -42,7 +42,7 @@ _ABSOLUTE_ROW_PATTERN = re.compile(r"\$(\d+):\$(\d+)")
 _ABSOLUTE_COLUMN_PATTERN = re.compile(r"\$([A-Za-z]{1,3}):\$([A-Za-z]{1,3})")
 _NAMED_RANGE_PATTERN = re.compile(
     r"^(?:'((?:[^']|'')+)'|([^!]+))!"
-    r"\$([A-Za-z]{1,3})\$(\d+):\$([A-Za-z]{1,3})\$(\d+)$"
+    r"\$?([A-Za-z]{1,3})\$?(\d+):\$?([A-Za-z]{1,3})\$?(\d+)$"
 )
 _PAPER_SIZE_NAMES = {1: "Letter", 5: "Legal", 8: "A3", 9: "A4", 11: "A5"}
 
@@ -532,8 +532,8 @@ def _load_defined_names(root: ET.Element, workbook: "Workbook") -> None:
                     continue
                 sheet_name = (match.group(1) or match.group(2)).replace("''", "'")
                 address = (
-                    f"{match.group(3)}{match.group(4)}:"
-                    f"{match.group(5)}{match.group(6)}"
+                    f"{match.group(3).replace('$', '')}{match.group(4)}:"
+                    f"{match.group(5).replace('$', '')}{match.group(6)}"
                 )
                 workbook.add_named_range(
                     name, workbook.sheet(sheet_name).range(address)
@@ -631,6 +631,9 @@ def _load_sheet(
             worksheet._values.set(row, column, value)
         if style != DEFAULT_STYLE:
             worksheet._styles[(row, column)] = style
+            # 纯样式单元格也算作已触及，更新最大行列索引，
+            # 避免 max_row/max_column 小于实际带样式的范围。
+            worksheet._touch(row, column)
     _load_sheet_layout(root, worksheet, dxf_colors)
     _load_sheet_hyperlinks(package, member, root, worksheet)
     _load_sheet_notes(package, member, worksheet)
@@ -850,9 +853,13 @@ def _load_sheet_images(
                 from_row, from_column, from_row_offset, from_column_offset = _drawing_marker(anchor, "from")
                 if anchor_name == "twoCellAnchor":
                     to_row, to_column, _to_row_offset, _to_column_offset = _drawing_marker(anchor, "to")
-                    if to_row <= from_row or to_column <= from_column:
-                        raise InvalidFileError("twoCellAnchor 的终点必须位于起点右下方")
-                    bounds = (from_row, from_column, to_row - 1, to_column - 1)
+                    if to_row < from_row or to_column < from_column:
+                        raise InvalidFileError("twoCellAnchor 的终点不能位于起点左上方")
+                    # 允许图片只占一行（to_row == from_row）或只占一列
+                    #（to_column == from_column），此时 max 边界等于 min 边界。
+                    max_row = from_row if to_row == from_row else to_row - 1
+                    max_column = from_column if to_column == from_column else to_column - 1
+                    bounds = (from_row, from_column, max_row, max_column)
                     placement = ImagePlacement.CELL
                 else:
                     bounds = (from_row, from_column, from_row, from_column)
