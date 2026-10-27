@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..address import cell_address
+from ..errors import FormulaCalculationError
 from ..hyperlink import Hyperlink
 from ..note import Note
 from ..style import Style
@@ -446,6 +447,29 @@ class Cell:
         异常：非空公式的类型或内容无效时抛出 ``TypeError``。
         """
         self._worksheet._set_formula(self._row, self._column, formula)
+
+    def calculate(self) -> Any:
+        """功能：计算当前单元格并返回结果。
+
+        使用方法：``result = worksheet["C3"].calculate()``。
+        参数：无。
+        返回：普通值单元格返回当前普通值；公式单元格返回实时计算结果，并更新
+        公式缓存；空单元格返回 ``None``。
+        异常：公式计算失败（循环引用、不支持函数等）时抛出
+        :class:`FormulaCalculationError`。
+        """
+        if self.formula is None:
+            return self._worksheet._values.get(self._row, self._column)
+        from .calculation import _Evaluator
+
+        evaluator = _Evaluator(self._worksheet._workbook)
+        try:
+            return evaluator.calculate_cell(self._worksheet, self._row, self._column)
+        except FormulaCalculationError as error:
+            # 记录计算错误，使 formula_status / calculation_error 能正确反映状态
+            coordinate = (self._row, self._column)
+            self._worksheet._formula_errors[coordinate] = str(error)
+            raise
 
     @property
     def style(self) -> Style:

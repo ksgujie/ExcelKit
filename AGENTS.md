@@ -78,7 +78,7 @@ ExcelKit：纯 Python 的 Excel 读写库（XLSX/XLS/CSV/TSV），对外只有 `
 
 ## 当前状态（每次改完代码更新这里）
 
-**版本**：0.10.1（2026-10-27）｜约 10500 行 Python｜`excelkit/` 下 core/reader/writer 三层加顶层横切模块
+**版本**：0.11.0（2026-10-27）｜约 10500 行 Python｜`excelkit/` 下 core/reader/writer 三层加顶层横切模块
 
 **分层**
 
