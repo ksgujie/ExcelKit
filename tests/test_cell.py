@@ -68,5 +68,29 @@ class TestCellReadWrite(unittest.TestCase):
         self.assertEqual(self.ws["A5"].read().as_datetime(), datetime(2026, 8, 1, 12, 33))
 
 
+
+    def test_cell_as_write_back(self):
+        self.ws["A1"] = "123"
+        r = self.ws["A1"].as_int()
+        self.assertEqual(r, 123)
+        self.assertEqual(self.ws["A1"].value, 123)
+        self.ws["A2"].set_value("2026-8-1")
+        d = self.ws["A2"].as_date()
+        self.assertEqual(d, date(2026, 8, 1))
+        self.assertEqual(self.ws["A2"].value, date(2026, 8, 1))
+
+    def test_as_int_strict(self):
+        self.ws["A1"] = 3.14
+        with self.assertRaises(ValueError):
+            self.ws["A1"].as_int()
+        self.assertEqual(self.ws["A1"].value, 3.14)  # 失败不应写回
+        self.ws["A2"] = 3.0
+        self.assertEqual(self.ws["A2"].as_int(), 3)
+        self.assertEqual(self.ws["A2"].value, 3)
+        self.ws["A3"] = "3.0"
+        self.assertEqual(self.ws["A3"].as_int(), 3)
+        self.assertEqual(self.ws["A3"].value, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

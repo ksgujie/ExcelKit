@@ -50,5 +50,40 @@ class TestFileRoundTrip(unittest.TestCase):
             os.unlink(path)
 
 
+
+    def test_xlsx_merge_roundtrip(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "x"
+        ws.range("A1:B2").merge()
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.active.merged_ranges, ((0, 0, 1, 1),))
+        finally:
+            os.unlink(path)
+
+
+    def test_xlsx_freeze_and_autofilter_roundtrip(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "h1"
+        ws["B1"] = "h2"
+        ws["A2"] = 1
+        ws["B2"] = 2
+        ws.freeze_panes = "A2"
+        ws.auto_filter.range = "A1:B2"
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.active.freeze_panes, "A2")
+            self.assertEqual(wb2.active.auto_filter.range, "A1:B2")
+        finally:
+            os.unlink(path)
+
 if __name__ == "__main__":
     unittest.main()

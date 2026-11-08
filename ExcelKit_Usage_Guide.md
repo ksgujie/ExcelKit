@@ -297,6 +297,8 @@ ws.auto_filter.range = "A1:D100"    # 设置筛选区域
 ws.auto_filter.clear()              # 清除筛选
 ```
 
+> XLSX 读写会持久化 `freeze_panes` 与 `auto_filter.range`。
+
 ### 6.6 行高、列宽、隐藏
 
 ```python
@@ -451,7 +453,7 @@ assert ws["A1"].value == "123"
 | 方法 | 说明 |
 |------|------|
 | `as_string()` | 转字符串 |
-| `as_int()` | 转整数（不截断小数，NaN/Inf 报错） |
+| `as_int()` | 转整数（**严格**：非整数小数如 3.14 抛 `ValueError`，不截断；`3.0`/`"3"`/`"3.0"` 可转；NaN/Inf 报错） |
 | `as_float()` | 转浮点（拒绝 NaN/Inf） |
 | `as_bool()` | 接受 true/false/yes/no/是/否/1/0 |
 | `as_date()` | 支持 `#2026-8-1`、`2026-8-1`、`2026/8/1` |
@@ -684,6 +686,6 @@ python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.
 
 ---
 
-## 16. 版本隔离说明
+## 16. 版本管理说明
 
-本项目遵循版本隔离保存规范：每次修改入口或核心库时，递增版本号另存为新文件，旧版本保留。当前版本为 `v0.1.0`，详见 `W:\ExcelKit\ExcelKit项目整体情况概览.md`。
+本项目使用 **Git** 进行版本管理（不采用“修改即递增版本号另存新文件”的方式）。代码变更通过提交记录保留历史，重要里程碑可使用 tag/release。详见 `W:\ExcelKit\ExcelKit项目整体情况概览.md`。

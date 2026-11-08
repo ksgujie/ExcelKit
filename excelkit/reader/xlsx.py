@@ -10,9 +10,9 @@ import re
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
-from excelkit.address import cell_index, range_address
+from excelkit.address import cell_index, range_address, range_index
 from excelkit.core.image import EMU_PER_PIXEL, Image, _detect_image
-from excelkit.errors import InvalidFileError
+from excelkit.errors import InvalidAddressError, InvalidFileError
 
 _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _NS_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
@@ -184,7 +184,7 @@ def _load_sheet_images(zip_file: ZipFile, sheet_part: str, sheet_root) -> list[I
             continue
         try:
             mime, ext, nat_w, nat_h = _detect_image(data)
-        except Exception:
+        except (ValueError, InvalidFileError, KeyError, IndexError):
             continue
         alt = None
         c_nv = pic.find(f"{_XDR}nvPicPr/{_XDR}cNvPr")
@@ -244,9 +244,11 @@ def load_xlsx(filename: str) -> "Workbook":
 
         from excelkit.core.workbook import Workbook
 
-        workbook = Workbook()
-        workbook._sheets.clear()
-        workbook._name_index.clear()
+        # 创建空工作簿容器（不通过 __init__ 生成默认 Sheet1，避免加载时的实例/状态干扰）
+        workbook = Workbook.__new__(Workbook)
+        workbook._sheets = []
+        workbook._name_index = {}
+        workbook._active_index = 0
 
         for name, sheet_part in sheet_order:
             ws = workbook.add_sheet(name)
@@ -263,7 +265,29 @@ def load_xlsx(filename: str) -> "Workbook":
                 if rgb:
                     try:
                         ws.tab_color = rgb
-                    except ValueError:
+                    except (ValueError, InvalidAddressError):
+                        pass
+
+            # 冻结窗格
+            pane = sheet_root.find(f"{_NS}sheetViews/{_NS}sheetView/{_NS}pane")
+            if pane is not None:
+                try:
+                    top_left = pane.get("topLeftCell")
+                    x_split = int(pane.get("xSplit") or "0")
+                    y_split = int(pane.get("ySplit") or "0")
+                    if top_left and (x_split > 0 or y_split > 0):
+                        ws.freeze_panes = top_left
+                except (ValueError, InvalidAddressError, TypeError):
+                    pass
+
+            # 自动筛选
+            af = sheet_root.find(f"{_NS}autoFilter")
+            if af is not None:
+                ref = af.get("ref")
+                if ref:
+                    try:
+                        ws.auto_filter.range = ref
+                    except (ValueError, InvalidAddressError):
                         pass
 
             # 单元格
@@ -304,20 +328,20 @@ def load_xlsx(filename: str) -> "Workbook":
                     val = _cell_value(raw, cell_type, shared)
                     ws._set_cell_value(row_idx, col_idx, val, formula=formula)
 
-            # 合并
+            # 合并（捕获数据异常，暴露代码错误）
             for mc in sheet_root.iter(f"{_NS}mergeCell"):
                 ref = mc.get("ref")
                 if ref and ":" in ref:
                     try:
                         r1, c1, r2, c2 = range_index(ref)
                         ws._merge_cells(r1, c1, r2, c2)
-                    except Exception:
+                    except (ValueError, KeyError, IndexError, InvalidAddressError):
                         pass
 
-            # 图片
+            # 图片（捕获数据/文件异常，暴露代码错误）
             try:
                 ws._images = _load_sheet_images(zip_file, sheet_part, sheet_root)
-            except Exception:
+            except (ValueError, KeyError, IndexError, InvalidAddressError, InvalidFileError, ET.ParseError, OSError):
                 ws._images = []
 
         return workbook

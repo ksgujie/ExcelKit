@@ -15,7 +15,7 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 - 区域批量操作（range / values / set_values / clear / copy_to / merge / to_records）
 - 模板渲染（标量标签 + {loop items} / {/loop} 循环行块）
 - 基础公式计算（SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/AND/OR/NOT/ABS/INT/ROUND/CONCAT/LEN/LEFT/RIGHT/MID 等）
-- 合并单元格、冻结窗格、自动筛选、页面打印设置
+- 合并单元格、冻结窗格、自动筛选（XLSX 持久化）、页面打印设置
 
 ## 快速开始
 

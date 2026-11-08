@@ -375,11 +375,37 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
         dim = ET.SubElement(root, _q("dimension"))
         dim.set("ref", f"A1:{_cell_ref(max_r, max_c)}")
 
-    # 3. sheetFormatPr
+    # 3. sheetViews（冻结窗格）
+    freeze = getattr(ws, "_freeze_panes", None)
+    if freeze:
+        try:
+            from excelkit.address import cell_index as _ci
+            fr, fc = _ci(freeze)
+            if fr > 0 or fc > 0:
+                views = ET.SubElement(root, _q("sheetViews"))
+                sv = ET.SubElement(views, _q("sheetView"))
+                sv.set("workbookViewId", "0")
+                pane = ET.SubElement(sv, _q("pane"))
+                if fc > 0:
+                    pane.set("xSplit", str(fc))
+                if fr > 0:
+                    pane.set("ySplit", str(fr))
+                pane.set("topLeftCell", freeze)
+                if fr > 0 and fc > 0:
+                    pane.set("activePane", "bottomRight")
+                elif fr > 0:
+                    pane.set("activePane", "bottomLeft")
+                else:
+                    pane.set("activePane", "topRight")
+                pane.set("state", "frozen")
+        except Exception:
+            pass
+
+    # 4. sheetFormatPr
     sheet_format = ET.SubElement(root, _q("sheetFormatPr"))
     sheet_format.set("defaultRowHeight", "15")
 
-    # 4. sheetData
+    # 5. sheetData
     sheet_data = ET.SubElement(root, _q("sheetData"))
     if max_r >= 0 and max_c >= 0:
         for r in range(max_r + 1):
@@ -421,7 +447,12 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
                     t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
                     t_el.text = ""
 
-    # 5. mergeCells（必须在 sheetData 之后）
+    # 6. autoFilter（在 sheetData 之后、mergeCells 之前）
+    af = getattr(ws, "_auto_filter_range", None)
+    if af:
+        ET.SubElement(root, _q("autoFilter")).set("ref", af)
+
+    # 7. mergeCells
     if ws._merged:
         merge_cells = ET.SubElement(root, _q("mergeCells"))
         merge_cells.set("count", str(len(ws._merged)))
@@ -429,7 +460,7 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
             mc_el = ET.SubElement(merge_cells, _q("mergeCell"))
             mc_el.set("ref", f"{_cell_ref(min_r, min_c)}:{_cell_ref(mr, mc)}")
 
-    # 6. pageMargins + pageSetup
+    # 8. pageMargins + pageSetup
     page = ws._page
     # 简化：始终可省略 pageMargins；有设置时写 pageSetup
     if page.orientation == "landscape" or page.print_area or page.fit_width:
@@ -439,7 +470,7 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
         pg.set("fitToHeight", str(page.fit_height or 0))
         pg.set("paperSize", "9")
 
-    # 7. drawing（靠后）
+    # 9. drawing（靠后）
     if has_drawing:
         drawing = ET.SubElement(root, _q("drawing"))
         drawing.set(f"{{{_NS_R}}}id", "rId1")

@@ -28,16 +28,8 @@ description: 创建、修改、重构或调试 AutoHotkey v2 项目时使用。�
 
 1. **方案规划先行**：接收到需求后，先输出实现思路与规划。
 2. **严格等待授权**：在用户明确回复“可以编写代码”或类似确认指令前，绝对严禁创建或修改任何代码文件。
-3. **版本隔离保存**：经许可修改代码时，不得覆盖原程序，必须递增版本号另存为新文件，并在新文件顶部写入本次变更日志（ChangeLog）。
 
 授权判断以肯定指令为准，例如“可以编写代码”“开始写”“按此实现”。用户的沉默、继续提问或修改规划都不算授权。
-
-版本隔离的具体要求：
-
-- 入口脚本命名为 `main_vX.Y.Z.ahk`，版本号递增，旧版本必须保留。
-- 新文件顶部必须写入中文 ChangeLog，说明本次改了什么、为什么改。
-- 被修改的库文件同样要保留旧版，或在 Git 中提交并打标签；严禁只保留一份被覆盖的副本。
-- 版本号、当前文件路径必须同步写入概览文件和变更记录。
 
 ## 3. 防中断与跨账号交接规则（核心必须执行）
 
@@ -83,7 +75,7 @@ description: 创建、修改、重构或调试 AutoHotkey v2 项目时使用。�
 ```text
 MyProject/
   MyProject整体情况概览.md
-  main_v0.1.0.ahk          ; 当前版本入口，每次修改递增版本号
+  main.ahk          ; 当前版本入口
   lib/
     App.ahk                ; 应用名称、版本等常量
     Log.ahk                ; 统一日志
@@ -102,7 +94,7 @@ MyProject/
 
 ```autohotkey
 ; ============================================================
-; 文件：main_v0.1.0.ahk
+; 文件：main.ahk
 ; 项目：MyProject
 ; 版本：0.1.0
 ; 变更记录（ChangeLog）：
@@ -191,10 +183,10 @@ Log(message) {
 
 ```powershell
 # 前台运行：适合控制台/短脚本，能直接看到报错
-& "C:\AutoHotkey\v2\AutoHotkey64.exe" "W:\project\main_v0.1.0.ahk"
+& "C:\AutoHotkey\v2\AutoHotkey64.exe" "W:\project\main.ahk"
 
 # 后台运行：适合常驻热键/GUI 脚本，避免阻塞当前会话
-Start-Process "C:\AutoHotkey\v2\AutoHotkey64.exe" -ArgumentList '"W:\project\main_v0.1.0.ahk"'
+Start-Process "C:\AutoHotkey\v2\AutoHotkey64.exe" -ArgumentList '"W:\project\main.ahk"'
 ```
 
 运行后，把实际结果、退出码和用户需要测试的步骤写入概览文件的第 7、10 项。
@@ -281,7 +273,7 @@ if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码：$LASTEXITCODE" }
 
 > 最后更新：YYYY-MM-DD HH:mm
 > 当前版本：vX.Y.Z
-> 当前文件：`W:\project\main_vX.Y.Z.ahk`
+> 当前文件：`W:\project\main.ahk`
 
 ## 1. 项目目标与范围
 
@@ -305,7 +297,7 @@ if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码：$LASTEXITCODE" }
 
 ## 5. 下一步具体修改点
 
-1. 文件：`W:\project\main_vX.Y.Z.ahk`
+1. 文件：`W:\project\main.ahk`
    - 函数/模块：
    - 当前行为：
    - 目标行为：
@@ -321,8 +313,8 @@ if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码：$LASTEXITCODE" }
 
 ## 7. 运行与验证命令
 
-```powershell
-& "C:\AutoHotkey\v2\AutoHotkey64.exe" "W:\project\main_vX.Y.Z.ahk"
+​```powershell
+& "C:\AutoHotkey\v2\AutoHotkey64.exe" "W:\project\main.ahk"
 ```
 
 - 预期结果：
@@ -356,7 +348,7 @@ if ($LASTEXITCODE -ne 0) { throw "测试失败，退出码：$LASTEXITCODE" }
 - [ ] 已用中文给出方案，且未创建或修改任何文件。
 - [ ] 已收到明确的“可以编写代码”授权。
 - [ ] 已在动代码前更新《XX项目整体情况概览.md》，10 项齐全，路径和命令为绝对路径。
-- [ ] 已创建递增版本号的新文件，旧版本仍然保留。
 - [ ] 新文件头部有中文 ChangeLog，所有函数和核心分支有中文注释。
 - [ ] 已用绝对路径运行 AHK，并记录实际结果和退出码。
 - [ ] 若是代码修改，最后一行只有 `已完成`；若不是代码修改，没有该行。
+````

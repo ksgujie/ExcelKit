@@ -2,42 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime
 from typing import Any
 
 from excelkit.address import cell_address, cell_index
 from excelkit.errors import InvalidAddressError
 from excelkit.style import Style
-
-
-def parse_hash_datetime_literal(value: Any) -> Any:
-    """解析以 `#` 开头的日期/日期时间字面量。
-
-    规则：仅当值是字符串且以 `#` 开头时尝试解析；解析成功返回 `date` 或 `datetime`，
-    解析失败则返回原字符串（保持可预测性，不对非 `#` 字符串做隐式日期猜测）。
-    支持示例：`#2026-8-1`、`#2026/8/1`、`#2026-8-1 12:33`、`#2026/8/1 12:33:45`。
-    """
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if not text.startswith("#"):
-        return value
-    body = text[1:].strip()
-    # 日期时间（含空格分隔的时间）
-    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?", body)
-    if not m:
-        return value
-    try:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if m.group(4) is not None:
-            hh = int(m.group(4))
-            mm = int(m.group(5))
-            ss = int(m.group(6) or 0)
-            return datetime(y, mo, d, hh, mm, ss)
-        return date(y, mo, d)
-    except ValueError:
-        return value
 
 
 class CellValue:
@@ -58,7 +28,7 @@ class CellValue:
         return str(self._value)
 
     def as_int(self) -> int:
-        """转为整数，不截断小数；无法转换时抛出 ValueError。"""
+        """转为整数；不截断小数（非整数浮点抛 ValueError），拒绝 NaN/Inf。"""
         if self._value is None:
             raise ValueError("无法将 None 转为 int")
         if isinstance(self._value, bool):
@@ -68,9 +38,21 @@ class CellValue:
         if isinstance(self._value, float):
             if self._value != self._value or self._value in (float("inf"), float("-inf")):
                 raise ValueError(f"无法将 {self._value!r} 转为 int")
+            if not self._value.is_integer():
+                raise ValueError(f"无法将非整数小数转为 int：{self._value!r}")
             return int(self._value)
         if isinstance(self._value, str):
-            return int(self._value.strip())
+            text = self._value.strip()
+            # 允许 "3.0" 这类整数值字符串
+            try:
+                if "." in text or "e" in text.lower() or "E" in text:
+                    f = float(text)
+                    if f != f or f in (float("inf"), float("-inf")) or not f.is_integer():
+                        raise ValueError
+                    return int(f)
+                return int(text)
+            except ValueError:
+                raise ValueError(f"无法将 {self._value!r} 转为 int") from None
         raise ValueError(f"无法将 {self._value!r} 转为 int")
 
     def as_float(self) -> float:
@@ -104,16 +86,23 @@ class CellValue:
         raise ValueError(f"无法将 {self._value!r} 转为 bool")
 
     def as_date(self) -> date:
-        """转为 date。"""
+        """转为 date。支持 # 前缀与常见 YYYY-M-D / YYYY/M/D 格式。"""
         if isinstance(self._value, date) and not isinstance(self._value, datetime):
             return self._value
         if isinstance(self._value, datetime):
             return self._value.date()
         if isinstance(self._value, str):
             text = self._value.strip()
-            # 支持 #YYYY-M-D 或 YYYY-M-D / YYYY/M/D
             if text.startswith("#"):
-                text = text[1:]
+                text = text[1:].strip()
+            # 兼容非零填充
+            for sep in ("-", "/"):
+                parts = text.split(sep)
+                if len(parts) == 3 and all(p.isdigit() for p in parts):
+                    try:
+                        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    except ValueError:
+                        pass
             for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
                 try:
                     return datetime.strptime(text, fmt).date()
@@ -122,7 +111,7 @@ class CellValue:
         raise ValueError(f"无法将 {self._value!r} 转为 date")
 
     def as_datetime(self) -> datetime:
-        """转为 datetime。"""
+        """转为 datetime。支持 # 前缀与常见日期/时间格式。"""
         if isinstance(self._value, datetime):
             return self._value
         if isinstance(self._value, date):
@@ -130,7 +119,25 @@ class CellValue:
         if isinstance(self._value, str):
             text = self._value.strip()
             if text.startswith("#"):
-                text = text[1:]
+                text = text[1:].strip()
+            # 兼容非零填充
+            for sep in ("-", "/"):
+                if " " in text or "T" in text:
+                    dt_part, tm_part = text.replace("T", " ").split(" ", 1)
+                else:
+                    dt_part, tm_part = text, ""
+                dparts = dt_part.split(sep)
+                if len(dparts) == 3 and all(p.isdigit() for p in dparts):
+                    try:
+                        if tm_part:
+                            tparts = tm_part.split(":")
+                            if len(tparts) >= 2 and all(p.isdigit() for p in tparts[:3]):
+                                ss = int(tparts[2]) if len(tparts) > 2 else 0
+                                return datetime(int(dparts[0]), int(dparts[1]), int(dparts[2]), int(tparts[0]), int(tparts[1]), ss)
+                        else:
+                            return datetime(int(dparts[0]), int(dparts[1]), int(dparts[2]))
+                    except ValueError:
+                        pass
             for fmt in (
                 "%Y-%m-%d %H:%M:%S",
                 "%Y/%m/%d %H:%M:%S",
@@ -218,11 +225,11 @@ class Cell:
 
     # ---------- 转换 ----------
 
-    def copy_style(self, source: Cell) -> None:
+    def copy_style(self, source: "Cell") -> None:
         """从另一个 Cell 复制完整样式，不复制值和公式。"""
         self.style = source.style
 
-    def set_value(self, value: Any) -> Cell:
+    def set_value(self, value: Any) -> "Cell":
         """写入值并返回当前 Cell，用于链式类型转换。"""
         self.value = value
         return self
@@ -232,22 +239,40 @@ class Cell:
         return CellValue(self.value)
 
     def as_string(self) -> str:
-        return self.read().as_string()
+        """转换为字符串，写回单元格并返回。"""
+        result = self.read().as_string()
+        self.value = result
+        return result
 
     def as_int(self) -> int:
-        return self.read().as_int()
+        """转换为整数，写回单元格并返回；非整数小数会抛 ValueError。"""
+        result = self.read().as_int()
+        self.value = result
+        return result
 
     def as_float(self) -> float:
-        return self.read().as_float()
+        """转换为浮点数，写回单元格并返回。"""
+        result = self.read().as_float()
+        self.value = result
+        return result
 
     def as_bool(self) -> bool:
-        return self.read().as_bool()
+        """转换为布尔值，写回单元格并返回。"""
+        result = self.read().as_bool()
+        self.value = result
+        return result
 
     def as_date(self) -> date:
-        return self.read().as_date()
+        """转换为日期，写回单元格并返回。"""
+        result = self.read().as_date()
+        self.value = result
+        return result
 
     def as_datetime(self) -> datetime:
-        return self.read().as_datetime()
+        """转换为日期时间，写回单元格并返回。"""
+        result = self.read().as_datetime()
+        self.value = result
+        return result
 
 
 __all__ = ["Cell", "CellValue"]
