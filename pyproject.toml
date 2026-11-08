@@ -11,9 +11,7 @@ requires-python = ">=3.8"
 license = "MIT"
 authors = [{ name = "ksgujie" }]
 keywords = ["excel", "xlsx", "xls", "csv", "tsv"]
-
-[project.optional-dependencies]
-xls = ["xlrd", "xlwt"]
+dependencies = ["xlrd", "xlwt"]
 
 [tool.setuptools.packages.find]
 where = ["."]

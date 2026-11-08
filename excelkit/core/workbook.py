@@ -154,13 +154,6 @@ class Workbook:
             if ws.name in seen_names:
                 problems.append(f"重复的工作表名称：{ws.name}")
             seen_names.add(ws.name)
-        # 表名称全局唯一
-        table_names: set[str] = set()
-        for ws in self._sheets:
-            for t in ws.tables:
-                if t.name in table_names:
-                    problems.append(f"重复的数据表名称：{t.name}")
-                table_names.add(t.name)
         return problems
 
     # ---------- 保存 ----------

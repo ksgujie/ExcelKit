@@ -8,12 +8,12 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 
 - Workbook / Worksheet / Cell / Range 对象模型
 - A1 地址与 0-based 索引（先行、后列）
-- XLSX / XLS / CSV / TSV 读写（XLSX 纯标准库，无外部依赖；XLS 需 xlrd/xlwt）
+- XLSX / XLS / CSV / TSV 读写（XLSX/CSV/TSV 纯标准库；XLS 使用 xlrd/xlwt，默认安装）
 - 单元格值、公式、基础样式（Font/Fill/Border/Alignment/Style）
 - 区域批量操作（range / values / set_values / clear / copy_to / merge / to_records）
 - 模板渲染（标量标签 + {loop items} / {/loop} 循环行块）
 - 基础公式计算（SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/AND/OR/NOT/ABS/INT/ROUND/CONCAT/LEN/LEFT/RIGHT/MID 等）
-- 合并单元格、冻结窗格、自动筛选、页面打印设置、基础数据表
+- 合并单元格、冻结窗格、自动筛选、页面打印设置
 
 ## 快速开始
 
@@ -40,11 +40,9 @@ print(wb2.active["C2"].value)   # 183.0
 
 ```bash
 pip install .
-# 需要 XLS 支持时：
-pip install .[xls]
-# 或者
-pip install xlrd xlwt
 ```
+
+安装时会自动安装 `xlrd`、`xlwt`，因此 XLS 开箱即用；XLSX/CSV/TSV 使用 Python 标准库。
 
 ## 运行测试
 

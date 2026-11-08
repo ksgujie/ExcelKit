@@ -10,7 +10,7 @@
 
 ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub 项目 **ksgujie/ExcelKit** 精简而来。
 
-只保留日常办公中高频使用的核心功能，去掉图表、图片、条件格式、数据验证、工作簿/工作表保护等装饰性功能，代码精简、易维护、无第三方强制依赖（XLSX 读写纯标准库实现）。
+只保留日常办公中高频使用的核心功能，去掉图表、图片、条件格式、数据验证、工作簿/工作表保护等装饰性功能，代码精简、易维护。XLSX/CSV/TSV 纯标准库实现，仅 XLS 使用 xlrd/xlwt。
 
 ### 核心功能
 
@@ -22,9 +22,9 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 | 区域操作 | `ws.range("A1:C10")`、值读写、清除、复制、合并、转记录 |
 | 单元格样式 | Font、Fill、Border、Alignment、Style（不可变，可复用） |
 | 公式计算 | `wb.calculate()` 在 Python 端计算常用公式并缓存结果 |
-| 文件读写 | XLSX（纯标准库）、XLS（需 xlrd/xlwt）、CSV/TSV（标准库） |
+| 文件读写 | XLSX（纯标准库）、XLS（xlrd/xlwt，随包安装）、CSV/TSV（标准库） |
 | 模板渲染 | 标量标签 `{title}`、`{loop items}` 循环行块、数值表达式、格式过滤 |
-| 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置、基础数据表 |
+| 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置 |
 
 ### 明确不做（已精简掉）
 
@@ -34,27 +34,20 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 - 行列插入/删除、文档属性
 - `auto_fill` 序列填充、`find/replace`
 - `render_many` / `export_pages` 等包装循环的 API
+- 数据表（Table）、命名区域
 
 ---
 
 ## 2. 安装
 
-### 方式一：从源码安装（推荐）
+### 从源码安装
 
 ```bash
 # 在 W:\ExcelKit 目录下
 pip install .
 ```
 
-### 方式二：XLS 格式支持（可选）
-
-XLSX/CSV/TSV 使用 Python 标准库，无需额外安装。如需读写 `.xls` 格式，需安装 `xlrd`、`xlwt`：
-
-```bash
-pip install xlrd xlwt
-# 或
-pip install .[xls]
-```
+安装时会自动安装 `xlrd`、`xlwt`，因此 `.xls` 开箱即用；XLSX/CSV/TSV 使用 Python 标准库，无需其他依赖。
 
 ---
 
@@ -160,12 +153,12 @@ wb.save("report.xlsx")
 wb.save("report.csv")
 wb.save("report.tsv")
 
-# 保存前结构校验（发现合并区域重叠、数据表区域重叠等问题）
+# 保存前结构校验（发现合并区域重叠等问题）
 wb.save("report.xlsx", validate=True)
 
 # 加载文件
 wb2 = Workbook.load("input.xlsx")   # XLSX / XLSM / XLTX
-wb3 = Workbook.load("input.xls")    # XLS（需 xlrd）
+wb3 = Workbook.load("input.xls")    # XLS
 wb4 = Workbook.load("input.csv")    # CSV
 wb5 = Workbook.load("input.tsv")    # TSV
 ```
@@ -196,7 +189,7 @@ if problems:
         print(p)
 ```
 
-校验内容包括：合并区域重叠、数据表区域重叠、重复的工作表名称、重复的数据表名称。
+校验内容包括：合并区域重叠、重复的工作表名称。
 
 ---
 
@@ -318,24 +311,7 @@ page.show_gridlines = False         # 屏幕不显示网格线
 page.print_gridlines = True         # 打印时显示网格线
 ```
 
-### 6.8 数据表（基础 Table）
-
-```python
-table = ws.add_table(
-    "A1:D100",
-    name="Orders",
-    style="TableStyleMedium9",
-    has_header=True,
-    show_row_stripes=True,
-)
-table.set_total("金额", "sum")        # 设置汇总行函数
-
-print(ws.tables)                    # 枚举本表全部表
-t = ws.table("Orders")              # 按名称查询
-ws.remove_table("Orders")           # 删除定义（不删除单元格数据）
-```
-
-### 6.9 查找与替换
+### 6.8 查找与替换
 
 ```python
 # 查找（返回 Cell 列表）
@@ -349,7 +325,7 @@ print(f"替换了 {count} 个单元格")
 
 参数：`whole` 是否完全匹配，`case_sensitive` 是否区分大小写，`limit` 替换数量上限。
 
-### 6.10 导出单表为 CSV/TSV
+### 6.9 导出单表为 CSV/TSV
 
 ```python
 ws.export("sheet.csv")              # 默认逗号分隔
@@ -592,7 +568,7 @@ wb.render(data, strict=True)    # 缺失字段抛出 TemplateError
 | 格式 | 读取 | 写出 | 依赖 |
 |------|------|------|------|
 | `.xlsx` | ✅ | ✅ | 无（标准库） |
-| `.xls` | ✅ | ✅ | `xlrd` / `xlwt` |
+| `.xls` | ✅ | ✅ | 随包安装 `xlrd` / `xlwt` |
 | `.csv` | ✅ | ✅ | 无（标准库） |
 | `.tsv` | ✅ | ✅ | 无（标准库） |
 
@@ -605,8 +581,8 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 1. **索引从 0 开始**：`ws.cell(0, 0)` 是 A1，与 Excel 界面显示的行列号不同。
 2. **公式不自动重算**：读取公式单元格时返回缓存结果；调用 `wb.calculate()` 后才会在 Python 端重新计算。
 3. **样式不可变**：`Style`/`Font` 等为 frozendataclass，可安全复用；修改需新建对象。
-4. **XLS 依赖**：读写 `.xls` 需安装 `xlrd`、`xlwt`，否则只影响 XLS 功能，XLSX/CSV/TSV 不受影响。
-5. **保存前校验**：重要报表建议 `wb.save(..., validate=True)`，可提前发现合并区域/数据表区域重叠等问题。
+4. **XLS 依赖**：`.xls` 使用 `xlrd`、`xlwt`，已随 `pip install .` 自动安装，无需单独处理。
+5. **保存前校验**：重要报表建议 `wb.save(..., validate=True)`，可提前发现合并区域重叠等问题。
 6. **路径建议**：使用绝对路径或 `A_ScriptDir` 风格的相对路径，避免工作目录变化导致文件找不到。
 
 ---
@@ -616,7 +592,7 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 | 对象 | 常用方法/属性 |
 |------|--------------|
 | `Workbook()` | `add_sheet()`, `sheet()`, `remove_sheet()`, `move_sheet()`, `copy_sheet()`, `active`, `sheets`, `save()`, `load()`, `calculate()`, `validate()`, `render()` |
-| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `add_table()`, `find()`, `replace()`, `export()`, `tab_color` |
+| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `find()`, `replace()`, `export()`, `tab_color` |
 | `Cell` | `value`, `formula`, `style`, `read()`, `as_int()`, `as_float()`, `as_bool()`, `as_date()`, `as_datetime()`, `set_value()`, `copy_style()` |
 | `Range` | `values`, `set_values()`, `clear()`, `copy_to()`, `merge()`, `unmerge()`, `to_records()`, `address` |
 
@@ -629,7 +605,7 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.test_append tests.test_range tests.test_formula tests.test_file tests.test_style tests.test_template -v
 ```
 
-预期：`Ran 42 tests, OK`，退出码为 0。
+预期：`Ran 46 tests, OK`，退出码为 0。
 
 ---
 

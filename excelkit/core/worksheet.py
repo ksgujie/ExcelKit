@@ -9,7 +9,6 @@ from excelkit.errors import InvalidAddressError, InvalidWorksheetNameError
 from excelkit.style import Style
 from excelkit.core.dimension import ColumnDimension, RowDimension
 from excelkit.core.page import PageSettings
-from excelkit.core.table import Table
 
 
 class Worksheet:
@@ -41,8 +40,6 @@ class Worksheet:
         self._auto_filter_range: str | None = None
         # 页面设置
         self._page = PageSettings()
-        # 数据表
-        self._tables: dict[str, Table] = {}
         # 可见性
         self._visibility = self.VISIBLE
 
@@ -129,11 +126,6 @@ class Worksheet:
     def page(self) -> PageSettings:
         """页面布局与打印设置唯一入口。"""
         return self._page
-
-    @property
-    def tables(self) -> tuple[Table, ...]:
-        """枚举本表全部数据表定义。"""
-        return tuple(self._tables.values())
 
     # ---------- 单元格访问 ----------
 
@@ -301,49 +293,6 @@ class Worksheet:
             return None
         return self.range(range_address(0, 0, self._max_row, self._max_column))
 
-    # ---------- 数据表 ----------
-
-    def add_table(
-        self,
-        address: str,
-        *,
-        name: str | None = None,
-        style: str | None = None,
-        has_header: bool = True,
-        show_row_stripes: bool = True,
-        show_column_stripes: bool = False,
-    ) -> Table:
-        """在连续区域上创建基础数据表。"""
-        min_r, min_c, max_r, max_c = range_index(address)
-        ref = range_address(min_r, min_c, max_r, max_c)
-        if name is None:
-            name = f"Table{len(self._tables) + 1}"
-        if name in self._tables:
-            raise InvalidWorksheetNameError(f"数据表名称已存在：{name!r}")
-        table = Table(
-            name=name,
-            ref=ref,
-            style=style,
-            has_header=has_header,
-            show_row_stripes=show_row_stripes,
-            show_column_stripes=show_column_stripes,
-        )
-        self._tables[name] = table
-        return table
-
-    def table(self, name: str) -> Table:
-        """按名称查询数据表。"""
-        if name not in self._tables:
-            raise InvalidWorksheetNameError(f"数据表不存在：{name!r}")
-        return self._tables[name]
-
-    def remove_table(self, name: str) -> "Worksheet":
-        """删除数据表定义，不删除区域内单元格数据。"""
-        if name not in self._tables:
-            raise InvalidWorksheetNameError(f"数据表不存在：{name!r}")
-        del self._tables[name]
-        return self
-
     # ---------- 校验 ----------
 
     def validate(self) -> list[str]:
@@ -360,21 +309,6 @@ class Worksheet:
                 ):
                     problems.append(
                         f"合并区域重叠：{range_address(*m1)} 与 {range_address(*m2)}"
-                    )
-        # 检查数据表区域是否重叠
-        table_list = list(self._tables.values())
-        for i, t1 in enumerate(table_list):
-            for t2 in table_list[i + 1 :]:
-                r1 = range_index(t1.ref)
-                r2 = range_index(t2.ref)
-                if (
-                    r1[0] <= r2[2]
-                    and r1[2] >= r2[0]
-                    and r1[1] <= r2[3]
-                    and r1[3] >= r2[1]
-                ):
-                    problems.append(
-                        f"数据表区域重叠：{t1.name} ({t1.ref}) 与 {t2.name} ({t2.ref})"
                     )
         return problems
 
