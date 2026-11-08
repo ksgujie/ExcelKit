@@ -6,8 +6,6 @@ from typing import Any
 
 from excelkit.address import cell_address, cell_index
 from excelkit.errors import InvalidAddressError, InvalidFileError, InvalidWorksheetNameError
-from excelkit.core.named_range import NamedRange
-from excelkit.core.range import Range
 from excelkit.core.worksheet import Worksheet
 
 
@@ -18,7 +16,6 @@ class Workbook:
         self._sheets: list[Worksheet] = []
         self._name_index: dict[str, int] = {}  # 小写名称 -> 索引
         self._active_index: int = 0
-        self._named_ranges: dict[str, NamedRange] = {}  # 小写名称 -> NamedRange
         self.add_sheet("Sheet1")
 
     # ---------- 属性 ----------
@@ -71,12 +68,6 @@ class Workbook:
         key = ws.name.lower()
         del self._name_index[key]
         del self._sheets[idx]
-        # 相关命名区域删除（引用该工作表的）
-        to_remove = [
-            name for name, nr in self._named_ranges.items() if nr._sheet is ws
-        ]
-        for name in to_remove:
-            del self._named_ranges[name]
         if not self._sheets:
             self.add_sheet("Sheet1")
             self._active_index = 0
@@ -117,38 +108,6 @@ class Workbook:
         if key_old in self._name_index and self._sheets[self._name_index[key_old]] is worksheet:
             del self._name_index[key_old]
         self._name_index[new.lower()] = self._sheets.index(worksheet)
-
-    # ---------- 命名区域 ----------
-
-    def add_named_range(self, name: str, area: Range) -> NamedRange:
-        """创建工作簿级命名区域。"""
-        key = name.lower()
-        if key in self._named_ranges:
-            raise InvalidWorksheetNameError(f"命名区域已存在：{name!r}")
-        nr = NamedRange(name, area.address)
-        nr._sheet = area._worksheet
-        self._named_ranges[key] = nr
-        return nr
-
-    def named_range(self, name: str) -> NamedRange:
-        """按名称查询命名区域（不区分大小写）。"""
-        key = name.lower()
-        if key not in self._named_ranges:
-            raise InvalidWorksheetNameError(f"命名区域不存在：{name!r}")
-        return self._named_ranges[key]
-
-    @property
-    def named_ranges(self) -> tuple[NamedRange, ...]:
-        """枚举全部命名区域。"""
-        return tuple(self._named_ranges.values())
-
-    def remove_named_range(self, name: str) -> Workbook:
-        """删除命名区域。"""
-        key = name.lower()
-        if key not in self._named_ranges:
-            raise InvalidWorksheetNameError(f"命名区域不存在：{name!r}")
-        del self._named_ranges[key]
-        return self
 
     # ---------- 读取 ----------
 

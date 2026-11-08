@@ -217,6 +217,12 @@ def _build_sheet_xml(ws, shared_strings: list, styles_cache: dict, style_objects
     root = ET.Element(_q("worksheet"))
     root.set("xmlns", _NS_MAIN)
 
+    # 工作表标签颜色（sheetPr 必须是 worksheet 的第一个子元素）
+    if ws._color:
+        sheet_pr = ET.SubElement(root, _q("sheetPr"))
+        tab_color = ET.SubElement(sheet_pr, _q("tabColor"))
+        tab_color.set("rgb", ws._color if len(ws._color) == 8 else "FF" + ws._color)
+
     sheet_format = ET.SubElement(root, _q("sheetFormatPr"))
     sheet_format.set("defaultRowHeight", "15")
 

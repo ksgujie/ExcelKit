@@ -5,7 +5,7 @@ import sys
 import unittest
 from datetime import date, datetime
 
-sys.path.insert(0, r'W:\eyes\Temp\opencode')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from excelkit import Workbook
 from excelkit.style import Font, Style

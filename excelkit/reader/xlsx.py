@@ -113,6 +113,16 @@ def load_xlsx(filename: str) -> Workbook:
                 continue
             sheet_root = sheet_tree.getroot()
 
+            # 工作表标签颜色
+            tab_color_el = sheet_root.find(f"{_NS}sheetPr/{_NS}tabColor")
+            if tab_color_el is not None:
+                rgb = tab_color_el.get("rgb")
+                if rgb:
+                    try:
+                        ws.tab_color = rgb
+                    except ValueError:
+                        pass
+
             dim = sheet_root.find(f"{_NS}dimension")
             if dim is not None:
                 ref = dim.get("ref")

@@ -15,22 +15,22 @@
 
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
-| 项目骨架与目录 | 已完成 | W:\eyes\Temp\opencode\excelkit\ |
+| 项目骨架与目录 | 已完成 | W:\ExcelKit\excelkit\ |
 | 核心对象模型 (Workbook/Worksheet/Cell/Range) | 已完成 | 42 测试全部通过 |
 | 文件读写 (XLSX/XLS/CSV/TSV) | 已完成 | XLSX 纯标准库，XLS 依赖 xlrd/xlwt |
 | 样式系统 (Style/Font/Fill/Border/Alignment) | 已完成 | |
 | 区域操作 (range/values/set_values/clear/copy_to/merge) | 已完成 | |
 | 公式计算器与类型转换 | 已完成 | SUM/AVERAGE/IF/跨表等 |
 | 模板渲染 (render) | 已完成 | 标量标签 + {loop} 循环行块 |
-| 辅助功能 (冻结窗格/合并/自动筛选/页面设置/命名区域/基础 Table) | 已完成 | |
-| 示例与测试 | 已完成 | 42 个单元测试全部通过 |
+| 辅助功能 (冻结窗格/合并/自动筛选/页面设置/基础 Table) | 已完成 | |
+| 示例与测试 | 已完成 | 46 个单元测试全部通过 |
 
 ## 3. 已完成内容
 
 - 分析原 GitHub 项目各版本 (v0.1.0 ~ v0.9.0) 功能，完成功能清单与精简版 API 设计。
 - 下载 v0.9.0 源码至 W:\ExcelKit\demo\v0.9.0\ 并阅读 README、CHANGELOG、核心模块与示例。
 - 编写精简版完整源码（excelkit 包）及 9 个测试模块共 42 个测试用例，全部通过。
-- 代码可运行主目录：`W:\eyes\Temp\opencode\excelkit\`；测试目录：`W:\eyes\Temp\opencode\tests\`。
+- 代码可运行主目录：`W:\ExcelKit\excelkit\`；测试目录：`W:\eyes\Temp\opencode\tests\`。
 
 ## 4. 未完成/待修改内容
 
@@ -45,25 +45,24 @@
 
 | 路径 | 作用 | 备注 |
 | --- | --- | --- |
-| `W:\eyes\Temp\opencode\excelkit\__init__.py` | 顶层公共 API（Workbook/Worksheet/Cell/CellValue/Range） | |
-| `W:\eyes\Temp\opencode\excelkit\core\workbook.py` | Workbook 类 | 工作簿生命周期 |
-| `W:\eyes\Temp\opencode\excelkit\core\worksheet.py` | Worksheet 类 | 工作表核心操作 |
-| `W:\eyes\Temp\opencode\excelkit\core\cell.py` | Cell、CellValue 类 | 单元格读写与转换 |
-| `W:\eyes\Temp\opencode\excelkit\core\range.py` | Range 类 | 区域批量操作 |
-| `W:\eyes\Temp\opencode\excelkit\core\page.py` | 页面设置（简化） | 方向、纸张、边距、打印区域 |
-| `W:\eyes\Temp\opencode\excelkit\core\named_range.py` | 命名区域 | Workbook 级 |
-| `W:\eyes\Temp\opencode\excelkit\core\table.py` | 基础 Table | 数据表定义 |
-| `W:\eyes\Temp\opencode\excelkit\reader\xlsx.py` | XLSX 读取 | 标准库 zipfile/xml |
-| `W:\eyes\Temp\opencode\excelkit\reader\xls.py` | XLS 读取 | xlrd |
-| `W:\eyes\Temp\opencode\excelkit\reader\delimited.py` | CSV/TSV 读取 | 标准库 csv |
-| `W:\eyes\Temp\opencode\excelkit\writer\xlsx.py` | XLSX 写出 | 标准库 zipfile/xml |
-| `W:\eyes\Temp\opencode\excelkit\writer\xls.py` | XLS 写出 | xlwt |
-| `W:\eyes\Temp\opencode\excelkit\writer\delimited.py` | CSV/TSV 写出 | 标准库 csv |
-| `W:\eyes\Temp\opencode\excelkit\style.py` | 样式系统 | Font/Fill/Border/Alignment/Style |
-| `W:\eyes\Temp\opencode\excelkit\address.py` | A1 地址解析 | cell_index/range_index 等 |
-| `W:\eyes\Temp\opencode\excelkit\calculation.py` | 公式计算器 | 基础函数 |
-| `W:\eyes\Temp\opencode\excelkit\template.py` | 模板渲染 | 标量标签 + {loop} |
-| `W:\eyes\Temp\opencode\excelkit\errors.py` | 异常定义 | |
+| `W:\ExcelKit\excelkit\__init__.py` | 顶层公共 API（Workbook/Worksheet/Cell/CellValue/Range） | |
+| `W:\ExcelKit\excelkit\core\workbook.py` | Workbook 类 | 工作簿生命周期 |
+| `W:\ExcelKit\excelkit\core\worksheet.py` | Worksheet 类 | 工作表核心操作 |
+| `W:\ExcelKit\excelkit\core\cell.py` | Cell、CellValue 类 | 单元格读写与转换 |
+| `W:\ExcelKit\excelkit\core\range.py` | Range 类 | 区域批量操作 |
+| `W:\ExcelKit\excelkit\core\page.py` | 页面设置（简化） | 方向、纸张、边距、打印区域 |
+| `W:\ExcelKit\excelkit\core\table.py` | 基础 Table | 数据表定义 |
+| `W:\ExcelKit\excelkit\reader\xlsx.py` | XLSX 读取 | 标准库 zipfile/xml |
+| `W:\ExcelKit\excelkit\reader\xls.py` | XLS 读取 | xlrd |
+| `W:\ExcelKit\excelkit\reader\delimited.py` | CSV/TSV 读取 | 标准库 csv |
+| `W:\ExcelKit\excelkit\writer\xlsx.py` | XLSX 写出 | 标准库 zipfile/xml |
+| `W:\ExcelKit\excelkit\writer\xls.py` | XLS 写出 | xlwt |
+| `W:\ExcelKit\excelkit\writer\delimited.py` | CSV/TSV 写出 | 标准库 csv |
+| `W:\ExcelKit\excelkit\style.py` | 样式系统 | Font/Fill/Border/Alignment/Style |
+| `W:\ExcelKit\excelkit\address.py` | A1 地址解析 | cell_index/range_index 等 |
+| `W:\ExcelKit\excelkit\calculation.py` | 公式计算器 | 基础函数 |
+| `W:\ExcelKit\excelkit\template.py` | 模板渲染 | 标量标签 + {loop} |
+| `W:\ExcelKit\excelkit\errors.py` | 异常定义 | |
 | `W:\eyes\Temp\opencode\tests\test_*.py` | 9 个测试模块，42 个用例 | 全部通过 |
 
 ## 7. 运行与验证命令
@@ -97,6 +96,6 @@ python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.
 
 ## 10. 给下一个 AI 账号的接续指令
 
-- 先读取本文件，复述当前进展：精简版已完成，42 测试全部通过，主目录 `W:\eyes\Temp\opencode\excelkit\`。
+- 先读取本文件，复述当前进展：精简版已完成，42 测试全部通过，主目录 `W:\ExcelKit\excelkit\`。
 - 如需继续扩展，只在“明确不做”范围外谨慎添加；不要添加图表/图片/条件格式/保护/auto_fill。
 - 验证命令：在 `W:\eyes\Temp\opencode\` 运行上述 unittest 命令，退出码须为 0。

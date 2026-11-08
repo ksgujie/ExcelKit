@@ -24,7 +24,7 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 | 公式计算 | `wb.calculate()` 在 Python 端计算常用公式并缓存结果 |
 | 文件读写 | XLSX（纯标准库）、XLS（需 xlrd/xlwt）、CSV/TSV（标准库） |
 | 模板渲染 | 标量标签 `{title}`、`{loop items}` 循环行块、数值表达式、格式过滤 |
-| 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置、命名区域、基础数据表 |
+| 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置、基础数据表 |
 
 ### 明确不做（已精简掉）
 
@@ -140,13 +140,14 @@ print(wb.sheets)                    # 所有工作表的 tuple
 print(wb.active.name)               # 当前活动工作表名称
 ```
 
-### 5.2 工作表名称与颜色
+### 5.2 工作表名称与标签颜色
 
 ```python
 ws.name = "月报"                    # 重命名，自动同步工作簿索引
-ws.color = "4472C4"                 # 设置标签颜色（6 位 RGB 或 8 位 ARGB）
-print(ws.color)                     # 读取颜色
-ws.color = None                     # 清除颜色
+ws.tab_color = "4472C4"             # 标签颜色：6 位 RGB 或 8 位 ARGB
+print(ws.tab_color)                 # "4472C4"（自动转大写、去掉 #）
+ws.tab_color = "#FF0000"            # 6 位保存时按 FF 补全为 8 位 ARGB
+ws.tab_color = None                 # 清除颜色
 ```
 
 ### 5.3 保存与加载
@@ -196,16 +197,6 @@ if problems:
 ```
 
 校验内容包括：合并区域重叠、数据表区域重叠、重复的工作表名称、重复的数据表名称。
-
-### 5.6 命名区域（Workbook 级）
-
-```python
-rng = ws.range("C2:C100")
-nr = wb.add_named_range("SalesAmount", rng)
-print(wb.named_range("salesamount").ref)   # 不区分大小写
-print([n.name for n in wb.named_ranges])   # 枚举全部
-wb.remove_named_range("SalesAmount")
-```
 
 ---
 
@@ -624,8 +615,8 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 
 | 对象 | 常用方法/属性 |
 |------|--------------|
-| `Workbook()` | `add_sheet()`, `sheet()`, `remove_sheet()`, `move_sheet()`, `copy_sheet()`, `active`, `sheets`, `save()`, `load()`, `calculate()`, `validate()`, `render()`, `add_named_range()` |
-| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `add_table()`, `find()`, `replace()`, `export()` |
+| `Workbook()` | `add_sheet()`, `sheet()`, `remove_sheet()`, `move_sheet()`, `copy_sheet()`, `active`, `sheets`, `save()`, `load()`, `calculate()`, `validate()`, `render()` |
+| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `add_table()`, `find()`, `replace()`, `export()`, `tab_color` |
 | `Cell` | `value`, `formula`, `style`, `read()`, `as_int()`, `as_float()`, `as_bool()`, `as_date()`, `as_datetime()`, `set_value()`, `copy_style()` |
 | `Range` | `values`, `set_values()`, `clear()`, `copy_to()`, `merge()`, `unmerge()`, `to_records()`, `address` |
 

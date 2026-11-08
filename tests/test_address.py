@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, r'W:\eyes\Temp\opencode')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from excelkit.address import cell_index, cell_address, range_index, range_address
 from excelkit.errors import InvalidAddressError

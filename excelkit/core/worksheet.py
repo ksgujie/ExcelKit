@@ -65,13 +65,23 @@ class Worksheet:
         self._workbook._sync_sheet_name(self, old, value)
 
     @property
-    def color(self) -> str | None:
-        """工作表标签颜色（ARGB 或 6 位 RGB）。"""
+    def tab_color(self) -> str | None:
+        """工作表标签颜色（6 位 RGB 或 8 位 ARGB，不含 #）。"""
         return self._color
 
-    @color.setter
-    def color(self, value: str | None) -> None:
-        self._color = value
+    @tab_color.setter
+    def tab_color(self, value: str | None) -> None:
+        if value is None:
+            self._color = None
+            return
+        if not isinstance(value, str):
+            raise ValueError(f"标签颜色必须是字符串或 None：{value!r}")
+        text = value.strip().lstrip("#").upper()
+        if len(text) not in (6, 8) or any(ch not in "0123456789ABCDEF" for ch in text):
+            raise ValueError(
+                f"标签颜色必须是 6 位 RGB 或 8 位 ARGB 十六进制字符串：{value!r}"
+            )
+        self._color = text
 
     @property
     def max_row(self) -> int:

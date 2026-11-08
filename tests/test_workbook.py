@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, r'W:\eyes\Temp\opencode')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from excelkit import Workbook
 from excelkit.errors import InvalidWorksheetNameError, ValidationError
@@ -63,6 +63,45 @@ class TestWorkbookBasic(unittest.TestCase):
                 self.wb.save(path, validate=True)
         finally:
             os.unlink(path)
+
+
+class TestTabColor(unittest.TestCase):
+    def test_normalize_and_clear(self):
+        ws = Workbook().active
+        ws.tab_color = "#4472c4"
+        self.assertEqual(ws.tab_color, "4472C4")
+        ws.tab_color = "FFFF0000"
+        self.assertEqual(ws.tab_color, "FFFF0000")
+        ws.tab_color = None
+        self.assertIsNone(ws.tab_color)
+
+    def test_invalid_color(self):
+        ws = Workbook().active
+        for bad in ("", "#", "12345", "GGGGGG", "1234567", 123):
+            with self.assertRaises(ValueError):
+                ws.tab_color = bad
+
+    def test_roundtrip(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "x"
+        ws.tab_color = "4472C4"
+        wb.add_sheet("无颜色")
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.sheet("Sheet1").tab_color, "FF4472C4")
+            self.assertIsNone(wb2.sheet("无颜色").tab_color)
+        finally:
+            os.unlink(path)
+
+    def test_copy_sheet_keeps_color(self):
+        wb = Workbook()
+        wb.active.tab_color = "00FF00"
+        wb.copy_sheet("Sheet1", "副本")
+        self.assertEqual(wb.sheet("副本").tab_color, "00FF00")
 
 
 if __name__ == "__main__":
