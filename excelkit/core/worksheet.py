@@ -40,6 +40,8 @@ class Worksheet:
         self._auto_filter_range: str | None = None
         # 页面设置
         self._page = PageSettings()
+        # 图片
+        self._images: list[Any] = []
         # 可见性
         self._visibility = self.VISIBLE
 
@@ -126,6 +128,73 @@ class Worksheet:
     def page(self) -> PageSettings:
         """页面布局与打印设置唯一入口。"""
         return self._page
+
+    @property
+    def images(self) -> tuple:
+        """返回本工作表中的图片对象（只读副本）。"""
+        return tuple(self._images)
+
+    def add_image(
+        self,
+        anchor: str,
+        source: Any,
+        *,
+        mode: str = "float",
+        width: int | None = None,
+        height: int | None = None,
+        keep_aspect: bool = True,
+        offset: tuple[int, int] = (0, 0),
+        alt_text: str | None = None,
+    ):
+        """在工作表中插入图片并返回 Image 对象。
+
+        参数:
+            anchor: 锚定单元格或区域，如 "B2"、"B2:D6"。支持 `$A$1` 形式。
+            source: 图片路径、bytes 或二进制 file-like 对象（支持 PNG/JPEG）。
+            mode: "float" 浮动插入，固定像素尺寸，随单元格移动；
+                  "embed" 完全嵌入锚定区域，随行高/列宽变化而缩放。
+            width/height: float 模式下的显示尺寸（像素）；仅指定其一时按 keep_aspect 计算另一维。
+            keep_aspect: float 模式下是否保持宽高比。
+            offset: float 模式下相对锚点的 (x, y) 像素偏移。
+            alt_text: 图片替代文字。
+        """
+        from excelkit.core.image import create_image
+
+        img = create_image(
+            anchor,
+            source,
+            mode=mode,
+            width=width,
+            height=height,
+            keep_aspect=keep_aspect,
+            offset=offset,
+            alt_text=alt_text,
+        )
+        # embed 模式：若锚点为单个单元格且该单元格是某合并区域左上角，则自动扩展为整个合并区域
+        if img.mode == "embed" and ":" not in img.anchor:
+            try:
+                r, c = cell_index(img.anchor)
+                for mr1, mc1, mr2, mc2 in self._merged:
+                    if mr1 == r and mc1 == c:
+                        img.anchor = range_address(mr1, mc1, mr2, mc2)
+                        break
+            except Exception:
+                pass
+        self._images.append(img)
+        return img
+
+    def remove_image(self, image) -> "Worksheet":
+        """移除指定图片对象。"""
+        try:
+            self._images.remove(image)
+        except ValueError:
+            pass
+        return self
+
+    def clear_images(self) -> "Worksheet":
+        """清除本工作表中的全部图片。"""
+        self._images.clear()
+        return self
 
     # ---------- 单元格访问 ----------
 

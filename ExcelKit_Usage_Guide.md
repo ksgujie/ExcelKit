@@ -10,7 +10,7 @@
 
 ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub 项目 **ksgujie/ExcelKit** 精简而来。
 
-只保留日常办公中高频使用的核心功能，去掉图表、图片、条件格式、数据验证、工作簿/工作表保护等装饰性功能，代码精简、易维护。XLSX/CSV/TSV 纯标准库实现，仅 XLS 使用 xlrd/xlwt。
+只保留日常办公中高频使用的核心功能，去掉图表、条件格式、数据验证、工作簿/工作表保护等复杂功能；支持在 XLSX 中插入图片（浮动或嵌入单元格）。XLSX/CSV/TSV 纯标准库实现，仅 XLS 使用 xlrd/xlwt。
 
 ### 核心功能
 
@@ -23,18 +23,22 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 | 单元格样式 | Font、Fill、Border、Alignment、Style（不可变，可复用） |
 | 公式计算 | `wb.calculate()` 在 Python 端计算常用公式并缓存结果 |
 | 文件读写 | XLSX（纯标准库）、XLS（xlrd/xlwt，随包安装）、CSV/TSV（标准库） |
+| 图片插入 | XLSX 支持 PNG/JPEG：浮动锚定或完全嵌入单元格（随行高列宽缩放），支持读写往返 |
+| 地址转换 | `cell_index`/`cell_address`/`range_index`/`range_address`/`column_to_index`/`index_to_column`，支持 `$A$1` |
 | 模板渲染 | 标量标签 `{title}`、`{loop items}` 循环行块、数值表达式、格式过滤 |
 | 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置 |
 
 ### 明确不做（已精简掉）
 
-- 图表、图片、单元格批注、超链接
+- 图表、单元格批注、超链接
 - 条件格式、数据验证
+- Excel 365 “置于单元格内”的 richData/IMAGE 值类型（本库提供浮动/锚定嵌入两种图片模式）
 - 工作簿 / 工作表保护
 - 行列插入/删除、文档属性
 - `auto_fill` 序列填充、`find/replace`
 - `render_many` / `export_pages` 等包装循环的 API
 - 数据表（Table）、命名区域
+- `.xls` 格式写入图片（底层 `xlwt` 无图片 API；含图片保存 `.xls` 会抛 `UnsupportedFeatureError`）
 
 ---
 
@@ -106,7 +110,12 @@ print(ws2["C2"].value)  # 190.0（公式计算结果）
 ### 4.2 顶层入口
 
 ```python
-from excelkit import Workbook, Worksheet, Cell, CellValue, Range
+from excelkit import (
+    Workbook, Worksheet, Cell, CellValue, Range, Image,
+    cell_index, cell_address, range_index, range_address,
+    column_to_index, index_to_column,
+    XLSX_MAX_ROWS, XLSX_MAX_COLUMNS, XLS_MAX_ROWS, XLS_MAX_COLUMNS,
+)
 ```
 
 日常使用只需导入 `Workbook`，其余对象通过工作簿/工作表自动获取。
@@ -139,7 +148,7 @@ print(wb.active.name)               # 当前活动工作表名称
 ws.name = "月报"                    # 重命名，自动同步工作簿索引
 ws.tab_color = "4472C4"             # 标签颜色：6 位 RGB 或 8 位 ARGB
 print(ws.tab_color)                 # "4472C4"（自动转大写、去掉 #）
-ws.tab_color = "#FF0000"            # 6 位保存时按 FF 补全为 8 位 ARGB
+ws.tab_color = "#FF0000"            # 接受 6 位；保存 XLSX 时按不透明 FF 补全为 8 位 ARGB
 ws.tab_color = None                 # 清除颜色
 ```
 
@@ -332,6 +341,58 @@ ws.export("sheet.csv")              # 默认逗号分隔
 ws.export("sheet.tsv", delimiter="\t")
 ```
 
+
+### 6.10 插入图片（XLSX）
+
+支持 PNG/JPEG。图片锚定到单元格或区域，写入 XLSX 后可在 Excel/WPS 中查看；加载 XLSX 再保存可往返保留。
+
+```python
+# 浮动插入（默认）：固定像素尺寸，随单元格移动
+ws.add_image("B2", "logo.png")
+ws.add_image("B2", "logo.png", width=120)                 # 指定宽度，按比例计算高度
+ws.add_image("B2", b"...png bytes...", width=120, height=80, keep_aspect=False)
+ws.add_image("B2", "logo.png", offset=(4, 2), alt_text="公司 Logo")
+
+# 完全嵌入单元格：铺满锚定区域，随行高/列宽变化而缩放
+ws.add_image("B2", "photo.png", mode="embed")             # 铺满 B2
+ws.add_image("B2:D6", "banner.jpg", mode="embed")         # 铺满 B2:D6
+# 若 "B2" 是合并区域左上角，embed 模式会自动扩展为整个合并区域
+
+# 管理
+for img in ws.images:
+    print(img.anchor, img.mode, img.natural_width, img.natural_height)
+ws.remove_image(img)
+ws.clear_images()
+```
+
+参数说明：
+- `source`：文件路径、`bytes`/`bytearray`、或二进制 file-like 对象。
+- `mode="float"`：使用 `oneCellAnchor`，显示尺寸由图片像素或 `width`/`height` 决定。
+- `mode="embed"`：使用 `twoCellAnchor editAs="twoCell"`，图片铺满锚定单元格/区域，随行高列宽缩放；不支持 `width`/`height`。
+- `.xls` 保存含图片的工作簿会抛出 `UnsupportedFeatureError`（底层 `xlwt` 不支持图片写入）。CSV/TSV 为纯文本格式，不包含图片。
+
+## 6A. 地址与索引互转
+
+```python
+from excelkit import (
+    cell_index, cell_address, range_index, range_address,
+    column_to_index, index_to_column,
+    XLSX_MAX_ROWS, XLSX_MAX_COLUMNS, XLS_MAX_ROWS, XLS_MAX_COLUMNS,
+)
+
+cell_index("C8")                # (7, 2)  先行后列，0-based
+cell_index("$C$8")              # (7, 2)  支持绝对引用符号
+cell_address(7, 2)              # "C8"
+range_index("B3:D8")            # (2, 1, 7, 3)
+range_index("$B$3:$D$8")        # (2, 1, 7, 3)
+range_address(2, 1, 7, 3)       # "B3:D8"
+column_to_index("AA")           # 26（支持大小写）
+index_to_column(26)             # "AA"
+```
+
+上限常量（按格式区分）：`XLSX_MAX_ROWS=1048576`、`XLSX_MAX_COLUMNS=16384`；`XLS_MAX_ROWS=65536`、`XLS_MAX_COLUMNS=256`。通用地址解析/校验默认按 XLSX 上限处理。
+
+
 ---
 
 ## 7. Cell（单元格）用法
@@ -398,12 +459,19 @@ assert ws["A1"].value == "123"
 
 > ⚠️ 重要区别：`cell.as_*()` 会把转换结果**写回**单元格；`cell.read().as_*()` 只转换**读取快照**，绝不会影响后续保存的文件。
 
-### 7.5 日期字面量
+### 7.5 日期与时间
+
+直接赋值默认按原值存储（保持赋值语义唯一）。需要日期/时间类型时，建议直接赋 Python 对象，或使用类型转换：
 
 ```python
-ws["A1"] = "#2026-8-1"              # date
-ws["A2"] = "#2026/8/1 12:33"        # datetime
-ws["A3"] = "#2026-8-1 12:33:45"     # datetime
+from datetime import date, datetime
+
+ws["A1"] = date(2026, 8, 1)                 # 推荐：直接存 date
+ws["A2"] = datetime(2026, 8, 1, 12, 33)     # 推荐：直接存 datetime
+
+# 转换（as_date/as_datetime 支持 # 前缀可有可无）
+d = ws["A3"].read().as_date()               # 只读转换，不修改原值
+ws["A4"].set_value("#2026-8-1").as_date()  # 链式：写入并转换
 ```
 
 ---
@@ -574,11 +642,11 @@ wb.render(data, strict=False)   # 宽松：缺失标签清空，缺失循环视�
 | 格式 | 读取 | 写出 | 依赖 |
 |------|------|------|------|
 | `.xlsx` | ✅ | ✅ | 无（标准库） |
-| `.xls` | ✅ | ✅ | 随包安装 `xlrd` / `xlwt` |
+| `.xls` | ✅ | ✅（不含图片） | 随包安装 `xlrd` / `xlwt`；含图片保存抛 `UnsupportedFeatureError` |
 | `.csv` | ✅ | ✅ | 无（标准库） |
 | `.tsv` | ✅ | ✅ | 无（标准库） |
 
-XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式表达式。XLS 标签颜色因格式限制不写出。
+XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式表达式。XLS 标签颜色因格式限制不写出。XLS 不支持写入图片；XLSX 支持 PNG/JPEG 图片读写往返，CSV/TSV 忽略图片。
 
 ---
 
@@ -598,9 +666,10 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 | 对象 | 常用方法/属性 |
 |------|--------------|
 | `Workbook()` | `add_sheet()`, `sheet()`, `remove_sheet()`, `move_sheet()`, `copy_sheet()`, `active`, `sheets`, `save()`, `load()`, `calculate()`, `validate()`, `render()` |
-| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `find()`, `replace()`, `export()`, `tab_color` |
+| `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `find()`, `replace()`, `export()`, `tab_color`, `add_image()`, `images`, `remove_image()`, `clear_images()` |
 | `Cell` | `value`, `formula`, `style`, `read()`, `as_int()`, `as_float()`, `as_bool()`, `as_date()`, `as_datetime()`, `set_value()`, `copy_style()` |
 | `Range` | `values`, `set_values()`, `clear()`, `copy_to()`, `merge()`, `unmerge()`, `to_records()`, `address` |
+| 顶层函数 | `cell_index()`, `cell_address()`, `range_index()`, `range_address()`, `column_to_index()`, `index_to_column()`，常量 `XLSX_MAX_ROWS/COLUMNS`、`XLS_MAX_ROWS/COLUMNS` |
 
 ---
 
@@ -608,10 +677,10 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 
 ```bash
 # 在 W:\ExcelKit 目录下
-python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.test_append tests.test_range tests.test_formula tests.test_file tests.test_style tests.test_template -v
+python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.test_append tests.test_range tests.test_formula tests.test_file tests.test_style tests.test_template tests.test_image -v
 ```
 
-预期：`Ran 46 tests, OK`，退出码为 0。
+预期：`Ran 55 tests, OK`，退出码为 0。
 
 ---
 

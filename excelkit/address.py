@@ -5,23 +5,40 @@
     range_index("B3:D8") == (2, 1, 7, 3)  # (min_row, min_col, max_row, max_col)
 
 A1 字符串地址遵循 Excel 原生表示（1-based 列字母 + 1-based 行号）。
+支持绝对引用符号 `$`（如 `$A$1`），解析时会自动去除。
 """
+
+import re
 
 from excelkit.errors import InvalidAddressError
 
-MAX_ROW = 1048576
-MAX_COLUMN = 16384
+# Excel 格式上限常量（按格式区分）
+# XLSX（Office Open XML，Excel 2007+）最大行数与列数
+XLSX_MAX_ROWS = 1048576
+XLSX_MAX_COLUMNS = 16384
+# XLS（BIFF8，Excel 97-2003）最大行数与列数
+XLS_MAX_ROWS = 65536
+XLS_MAX_COLUMNS = 256
+
+# 通用地址解析/校验默认使用 XLSX 上限（现代主流格式）。
+# XLS 的 65536×256 限制由具体的 XLS 读写层按需约束。
+_DEFAULT_MAX_ROWS = XLSX_MAX_ROWS
+_DEFAULT_MAX_COLUMNS = XLSX_MAX_COLUMNS
 
 
 def column_to_index(column: str) -> int:
     """把 Excel 列字母转为 0-based 列索引。
 
     例如 "A" -> 0, "Z" -> 25, "AA" -> 26, "AB" -> 27。
+    接受大小写字母，内部统一按大写处理。
     """
-    if not column or not column.isalpha() or not column.isupper():
+    if not column or not isinstance(column, str):
+        raise InvalidAddressError(f"无效的列字母：{column!r}")
+    col = column.strip().upper()
+    if not col.isalpha():
         raise InvalidAddressError(f"无效的列字母：{column!r}")
     index = 0
-    for ch in column:
+    for ch in col:
         index = index * 26 + (ord(ch) - ord("A") + 1)
     return index - 1
 
@@ -30,8 +47,9 @@ def index_to_column(index: int) -> str:
     """把 0-based 列索引转为 Excel 列字母。
 
     例如 0 -> "A", 25 -> "Z", 26 -> "AA"。
+    默认按 XLSX 最大列数校验。
     """
-    if index < 0 or index >= MAX_COLUMN:
+    if index < 0 or index >= _DEFAULT_MAX_COLUMNS:
         raise InvalidAddressError(f"列索引超出范围：{index}")
     letters = []
     n = index + 1
@@ -41,21 +59,30 @@ def index_to_column(index: int) -> str:
     return "".join(reversed(letters))
 
 
+def _normalize_address(address: str) -> str:
+    """去除地址中的空白和绝对引用符号 `$`，便于统一解析。"""
+    if not isinstance(address, str):
+        raise InvalidAddressError(f"无效的单元格地址：{address!r}")
+    return address.strip().replace("$", "")
+
+
 def cell_index(address: str) -> tuple[int, int]:
     """把 A1 地址解析为 (row, column) 0-based 元组，先行后列。
 
-    例如 "C8" -> (7, 2)。
+    例如 "C8" -> (7, 2)，"$C$8" -> (7, 2)。
+    默认按 XLSX 行列上限校验。
     """
-    import re
-
-    m = re.fullmatch(r"([A-Za-z]+)(\d+)", address.strip())
+    addr = _normalize_address(address)
+    m = re.fullmatch(r"([A-Za-z]+)(\d+)", addr)
     if not m:
         raise InvalidAddressError(f"无效的单元格地址：{address!r}")
     col_str, row_str = m.group(1).upper(), m.group(2)
     column = column_to_index(col_str)
     row = int(row_str) - 1
-    if row < 0 or row >= MAX_ROW:
+    if row < 0 or row >= _DEFAULT_MAX_ROWS:
         raise InvalidAddressError(f"行号超出范围：{row + 1}")
+    if column >= _DEFAULT_MAX_COLUMNS:
+        raise InvalidAddressError(f"列索引超出范围：{column}")
     return (row, column)
 
 
@@ -64,9 +91,9 @@ def cell_address(row: int, column: int) -> str:
 
     例如 (7, 2) -> "C8"。
     """
-    if row < 0 or row >= MAX_ROW:
+    if row < 0 or row >= _DEFAULT_MAX_ROWS:
         raise InvalidAddressError(f"行索引超出范围：{row}")
-    if column < 0 or column >= MAX_COLUMN:
+    if column < 0 or column >= _DEFAULT_MAX_COLUMNS:
         raise InvalidAddressError(f"列索引超出范围：{column}")
     return f"{index_to_column(column)}{row + 1}"
 
@@ -74,15 +101,14 @@ def cell_address(row: int, column: int) -> str:
 def range_index(address: str) -> tuple[int, int, int, int]:
     """把 A1 区域地址解析为 (min_row, min_col, max_row, max_col) 0-based 元组。
 
-    例如 "B3:D8" -> (2, 1, 7, 3)。
+    例如 "B3:D8" -> (2, 1, 7, 3)，"$B$3:$D$8" -> (2, 1, 7, 3)。
     支持单单元格地址，例如 "A1" -> (0, 0, 0, 0)。
+    默认按 XLSX 行列上限校验。
     """
-    import re
-
-    address = address.strip()
+    addr = _normalize_address(address)
     m = re.fullmatch(
-        r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)", address
-    ) or re.fullmatch(r"([A-Za-z]+)(\d+)", address)
+        r"([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)", addr
+    ) or re.fullmatch(r"([A-Za-z]+)(\d+)", addr)
     if not m:
         raise InvalidAddressError(f"无效的区域地址：{address!r}")
     if m.lastindex == 4:
@@ -95,7 +121,7 @@ def range_index(address: str) -> tuple[int, int, int, int]:
     max_row = r2 - 1
     if min_row > max_row or min_col > max_col:
         raise InvalidAddressError(f"区域起止顺序无效：{address!r}")
-    if min_row < 0 or max_row >= MAX_ROW or min_col < 0 or max_col >= MAX_COLUMN:
+    if min_row < 0 or max_row >= _DEFAULT_MAX_ROWS or min_col < 0 or max_col >= _DEFAULT_MAX_COLUMNS:
         raise InvalidAddressError(f"区域超出范围：{address!r}")
     return (min_row, min_col, max_row, max_col)
 
@@ -104,6 +130,7 @@ def range_address(min_row: int, min_col: int, max_row: int, max_col: int) -> str
     """把 (min_row, min_col, max_row, max_col) 0-based 转为 A1 区域地址。
 
     例如 (2, 1, 7, 3) -> "B3:D8"。
+    单格区域返回 "A1:A1" 形式。
     """
     if min_row > max_row or min_col > max_col:
         raise InvalidAddressError("区域起止索引顺序无效")
@@ -111,8 +138,10 @@ def range_address(min_row: int, min_col: int, max_row: int, max_col: int) -> str
 
 
 __all__ = [
-    "MAX_ROW",
-    "MAX_COLUMN",
+    "XLS_MAX_ROWS",
+    "XLS_MAX_COLUMNS",
+    "XLSX_MAX_ROWS",
+    "XLSX_MAX_COLUMNS",
     "column_to_index",
     "index_to_column",
     "cell_index",

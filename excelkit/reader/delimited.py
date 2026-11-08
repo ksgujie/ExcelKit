@@ -27,11 +27,11 @@ def load_delimited(filename: str, *, encoding: str | None = None):
 def _convert(text: str):
     if text == "" or text is None:
         return None
-    # 日期字面量 #YYYY-M-D
-    if text.startswith("#"):
+    # 以 # 开头的日期/时间字面量：交给后续单元格赋值统一解析
+    if isinstance(text, str) and text.startswith("#"):
         return text
     try:
-        if "." in text or "e" in text.lower():
+        if "." in text or "e" in text.lower() or "E" in text:
             return float(text)
         return int(text)
     except ValueError:

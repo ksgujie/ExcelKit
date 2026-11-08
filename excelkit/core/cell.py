@@ -2,12 +2,42 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
 from excelkit.address import cell_address, cell_index
 from excelkit.errors import InvalidAddressError
 from excelkit.style import Style
+
+
+def parse_hash_datetime_literal(value: Any) -> Any:
+    """解析以 `#` 开头的日期/日期时间字面量。
+
+    规则：仅当值是字符串且以 `#` 开头时尝试解析；解析成功返回 `date` 或 `datetime`，
+    解析失败则返回原字符串（保持可预测性，不对非 `#` 字符串做隐式日期猜测）。
+    支持示例：`#2026-8-1`、`#2026/8/1`、`#2026-8-1 12:33`、`#2026/8/1 12:33:45`。
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text.startswith("#"):
+        return value
+    body = text[1:].strip()
+    # 日期时间（含空格分隔的时间）
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?", body)
+    if not m:
+        return value
+    try:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if m.group(4) is not None:
+            hh = int(m.group(4))
+            mm = int(m.group(5))
+            ss = int(m.group(6) or 0)
+            return datetime(y, mo, d, hh, mm, ss)
+        return date(y, mo, d)
+    except ValueError:
+        return value
 
 
 class CellValue:

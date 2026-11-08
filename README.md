@@ -2,13 +2,15 @@
 
 ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub 项目 ksgujie/ExcelKit 精简而来。
 
-只保留日常办公高频功能，去掉图表/图片/条件格式/保护等装饰性功能。
+只保留日常办公高频功能，去掉图表/条件格式/保护等复杂功能；支持在 XLSX 中插入图片（浮动/嵌入单元格）。
 
 ## 核心功能
 
 - Workbook / Worksheet / Cell / Range 对象模型
 - A1 地址与 0-based 索引（先行、后列）
 - XLSX / XLS / CSV / TSV 读写（XLSX/CSV/TSV 纯标准库；XLS 使用 xlrd/xlwt，默认安装）
+- 图片插入（XLSX）：PNG/JPEG，`mode="float"` 浮动 / `mode="embed"` 随单元格长宽缩放，支持读写往返
+- 地址与索引互转：`cell_index`/`cell_address`/`range_index`/`range_address`/`column_to_index`/`index_to_column`（支持 `$A$1`）
 - 单元格值、公式、基础样式（Font/Fill/Border/Alignment/Style）
 - 区域批量操作（range / values / set_values / clear / copy_to / merge / to_records）
 - 模板渲染（标量标签 + {loop items} / {/loop} 循环行块）
@@ -47,5 +49,5 @@ pip install .
 ## 运行测试
 
 ```bash
-python -m unittest discover -s tests -v
+python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.test_append tests.test_range tests.test_formula tests.test_file tests.test_style tests.test_template tests.test_image -v
 ```

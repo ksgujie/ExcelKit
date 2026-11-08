@@ -1,8 +1,17 @@
-"""XLS 写出器：依赖 xlwt，未安装时抛出清晰错误。"""
+"""XLS 写出器：依赖 xlwt；图片写入不支持（xlwt 限制）。"""
+
+from excelkit.errors import UnsupportedFeatureError
 
 
 def save_xls(workbook, filename: str) -> None:
-    """将工作簿写出为 XLS 文件。"""
+    """将工作簿写出为 XLS 文件。若工作簿包含图片则抛出 UnsupportedFeatureError。"""
+    # 检查图片：xlwt 不支持图片写入，避免静默丢失
+    for ws in workbook.sheets:
+        if getattr(ws, "_images", None):
+            raise UnsupportedFeatureError(
+                "XLS 格式的图片写入暂不支持（底层 xlwt 限制）。请改用 .xlsx 保存；"
+                "或移除图片后再保存为 .xls。"
+            )
     try:
         import xlwt  # noqa: F401
     except ImportError as exc:

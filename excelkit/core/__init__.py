@@ -2,6 +2,7 @@
 
 from excelkit.core.cell import Cell, CellValue
 from excelkit.core.dimension import ColumnDimension, RowDimension
+from excelkit.core.image import Image
 from excelkit.core.page import HeaderFooter, PageMargins, PageSettings
 from excelkit.core.range import Range
 from excelkit.core.workbook import Workbook
@@ -12,6 +13,7 @@ __all__ = [
     "Worksheet",
     "Cell",
     "CellValue",
+    "Image",
     "Range",
     "RowDimension",
     "ColumnDimension",

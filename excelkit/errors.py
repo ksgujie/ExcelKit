@@ -29,6 +29,10 @@ class ValidationError(ExcelKitError):
     """工作簿或工作表结构校验失败。"""
 
 
+class UnsupportedFeatureError(ExcelKitError):
+    """当前文件格式或后端不支持请求的功能（如 XLS 图片写入）。"""
+
+
 __all__ = [
     "ExcelKitError",
     "InvalidAddressError",
@@ -37,4 +41,5 @@ __all__ = [
     "FormulaCalculationError",
     "TemplateError",
     "ValidationError",
+    "UnsupportedFeatureError",
 ]
