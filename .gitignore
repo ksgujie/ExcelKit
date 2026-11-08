@@ -1,0 +1,13 @@
+*.pyc
+__pycache__/
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.log
+.DS_Store
+.build/
+dist/
+*.egg-info/
+.idea/
+.vscode/
