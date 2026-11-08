@@ -125,9 +125,13 @@ class Workbook:
         data: dict[str, Any] | None = None,
         *,
         sheet_data: dict[str | int, dict[str, Any]] | None = None,
-        strict: bool = False,
+        strict: bool = True,
     ) -> Workbook:
-        """使用公共或分工作表数据替换模板标签并展开循环行块。"""
+        """使用公共或分工作表数据替换模板标签并展开循环行块。
+
+        默认 strict=True：模板中的标签在数据中不存在时抛出 TemplateError；
+        传 strict=False 可改为缺失即清空。
+        """
         from excelkit.template import render_workbook
 
         render_workbook(self, data or {}, sheet_data or {}, strict)

@@ -97,4 +97,5 @@ python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.
 
 - 先读取本文件，复述当前进展：精简版已完成，46 测试全部通过，主目录 `W:\ExcelKit\excelkit\`。
 - 如需继续扩展，只在“明确不做”范围外谨慎添加；不要添加图表/图片/条件格式/保护/auto_fill。
+- 每次修改代码必须同步更新文档：`README.md`、`ExcelKit_Usage_Guide.md`、本概览文件，并在提交前运行全部单元测试。
 - 验证命令：在 `W:\ExcelKit\` 运行上述 unittest 命令，退出码须为 0。

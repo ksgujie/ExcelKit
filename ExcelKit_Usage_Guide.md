@@ -551,10 +551,16 @@ wb.render(
 
 ### 11.4 strict 模式
 
+`render` 默认 `strict=True`：模板中的标签在数据里找不到时立即抛出 `TemplateError`，便于尽早发现字段名拼写错误。
+
 ```python
-wb.render(data, strict=False)   # 默认：缺失标签清空，缺失循环视为空数组
-wb.render(data, strict=True)    # 缺失字段抛出 TemplateError
+wb.render(data)                 # 默认严格：缺失字段抛出 TemplateError
+wb.render(data, strict=False)   # 宽松：缺失标签清空，缺失循环视为空数组
 ```
+
+> 宽松模式适合“部分字段可选”的模板；严格模式适合报表字段固定的场景。
+>
+> 若 `data` 与 `sheet_data` 同时为空，`render()` 不会执行替换，也不会触发严格校验。
 
 规则：
 - 整个单元格只有一个标签时保留原始类型（数字/日期等）；混合文字时转为字符串
