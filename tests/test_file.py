@@ -3,6 +3,8 @@
 import os
 import sys
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 import unittest
 from datetime import date
 
@@ -82,6 +84,25 @@ class TestFileRoundTrip(unittest.TestCase):
             wb2 = Workbook.load(path)
             self.assertEqual(wb2.active.freeze_panes, "A2")
             self.assertEqual(wb2.active.auto_filter.range, "A1:B2")
+        finally:
+            os.unlink(path)
+
+
+    def test_xlsx_dimension_covers_merge_and_image_anchor(self):
+        wb = Workbook()
+        ws = wb.active
+        # merge with no cell values written beyond default state
+        ws.range("A1:C5").merge()
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            with zipfile.ZipFile(path) as zf:
+                root = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
+            ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            dim = root.find("m:dimension", ns)
+            self.assertIsNotNone(dim)
+            self.assertEqual(dim.get("ref"), "A1:C5")
         finally:
             os.unlink(path)
 

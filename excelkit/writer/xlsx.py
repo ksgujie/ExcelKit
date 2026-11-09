@@ -40,6 +40,19 @@ _CT_RELS = "application/vnd.openxmlformats-package.relationships+xml"
 _CT_XML = "application/xml"
 
 
+
+def _register_xlsx_namespaces(*, drawing: bool = False) -> None:
+    """集中注册 OOXML 序列化所需前缀。
+
+    注意：xml.etree.ElementTree.register_namespace 是进程级全局状态，stdlib 无作用域隔离 API。
+    集中在此注册可避免散落重复调用；宿主程序若依赖自定义前缀，可能受影响（ET 固有限制）。
+    """
+    ET.register_namespace("", _NS_MAIN)
+    ET.register_namespace("r", _NS_R)
+    if drawing:
+        ET.register_namespace("xdr", _NS_XDR)
+        ET.register_namespace("a", _NS_A)
+
 def _q(tag: str) -> str:
     return f"{{{_NS_MAIN}}}{tag}"
 
@@ -255,10 +268,7 @@ def _build_drawing_xml(ws, sheet_index: int, media_map: dict[int, str]) -> tuple
     media_map: 图片对象 id(img) -> zip 内 media 路径（如 ../media/image1.png，相对 drawings）
     返回 (drawing_xml, rels_xml)。
     """
-    # xdr 根
-    ET.register_namespace("xdr", _NS_XDR)
-    ET.register_namespace("a", _NS_A)
-    ET.register_namespace("r", _NS_R)
+    # xdr 根（命名空间由 _register_xlsx_namespaces 统一注册）
     root = ET.Element(f"{{{_NS_XDR}}}wsDr")
 
     # rels
@@ -358,8 +368,6 @@ def _build_pic(img, rid: str, pic_id: int) -> ET.Element:
 
 def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: bool) -> bytes:
     """生成单张工作表的 sheetN.xml 内容。"""
-    ET.register_namespace("", _NS_MAIN)
-    ET.register_namespace("r", _NS_R)
     root = ET.Element(_q("worksheet"))
 
     # 1. sheetPr（必须靠前）
@@ -368,9 +376,25 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
         tab_color = ET.SubElement(sheet_pr, _q("tabColor"))
         tab_color.set("rgb", ws._color if len(ws._color) == 8 else "FF" + ws._color)
 
-    # 2. dimension（建议在 sheetFormatPr 前）
+    # 2. dimension（建议在 sheetFormatPr 前；覆盖单元格/合并/图片锚点范围）
     max_r = ws._max_row
     max_c = ws._max_column
+    for mr0, mc0, mr1, mc1 in getattr(ws, "_merged", ()):
+        if mr1 > max_r: max_r = mr1
+        if mc1 > max_c: max_c = mc1
+    for img in getattr(ws, "_images", ()):
+        try:
+            if img.mode == "embed" or ":" in img.anchor:
+                ar1, ac1, ar2, ac2 = range_index(img.anchor)
+                if ar2 > max_r: max_r = ar2
+                if ac2 > max_c: max_c = ac2
+            else:
+                from excelkit.address import cell_index as _ci_img
+                ar, ac = _ci_img(img.anchor)
+                if ar > max_r: max_r = ar
+                if ac > max_c: max_c = ac
+        except Exception:
+            pass
     if max_r >= 0 and max_c >= 0:
         dim = ET.SubElement(root, _q("dimension"))
         dim.set("ref", f"A1:{_cell_ref(max_r, max_c)}")
@@ -482,6 +506,7 @@ def save_xlsx(workbook, filename: str, *, formulas: bool = False) -> None:
     """将工作簿写出为 XLSX 文件。"""
     styles_cache: dict = {}
     style_objects: dict = {}
+    _register_xlsx_namespaces(drawing=any(getattr(ws, "_images", None) for ws in workbook.sheets))
 
     # 收集全局 media（去重可选，这里按对象顺序编号）
     media_entries: list[tuple[str, bytes, str]] = []  # (filename, data, mime)
@@ -510,9 +535,7 @@ def save_xlsx(workbook, filename: str, *, formulas: bool = False) -> None:
 
     styles_bytes = _build_styles(styles_cache, style_objects)
 
-    # workbook.xml（使用命名空间注册，避免重复 xmlns 属性）
-    ET.register_namespace("", _NS_MAIN)
-    ET.register_namespace("r", _NS_R)
+    # workbook.xml
     wb_root = ET.Element(_q("workbook"))
     sheets_el = ET.SubElement(wb_root, _q("sheets"))
     for i, (name, _) in enumerate(sheets_xml):
