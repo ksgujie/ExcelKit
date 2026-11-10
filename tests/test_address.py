@@ -11,38 +11,38 @@ from excelkit import (
     XLS_MAX_ROWS,
     XLSX_MAX_COLUMNS,
     XLSX_MAX_ROWS,
-    cell_address,
-    cell_index,
+    index_to_cell,
+    cell_to_index,
     column_to_index,
     index_to_column,
-    range_address,
-    range_index,
+    index_to_range,
+    range_to_index,
 )
 from excelkit.errors import InvalidAddressError
 
 
 class TestAddress(unittest.TestCase):
-    def test_cell_index(self):
-        self.assertEqual(cell_index("A1"), (0, 0))
-        self.assertEqual(cell_index("C8"), (7, 2))
-        self.assertEqual(cell_index("AA1"), (0, 26))
+    def test_cell_to_index(self):
+        self.assertEqual(cell_to_index("A1"), (0, 0))
+        self.assertEqual(cell_to_index("C8"), (7, 2))
+        self.assertEqual(cell_to_index("AA1"), (0, 26))
 
-    def test_cell_address(self):
-        self.assertEqual(cell_address(0, 0), "A1")
-        self.assertEqual(cell_address(7, 2), "C8")
+    def test_index_to_cell(self):
+        self.assertEqual(index_to_cell(0, 0), "A1")
+        self.assertEqual(index_to_cell(7, 2), "C8")
 
-    def test_range_index(self):
-        self.assertEqual(range_index("B3:D8"), (2, 1, 7, 3))
-        self.assertEqual(range_index("A1"), (0, 0, 0, 0))
-        self.assertEqual(range_index("$B$3:$D$8"), (2, 1, 7, 3))
+    def test_range_to_index(self):
+        self.assertEqual(range_to_index("B3:D8"), (2, 1, 7, 3))
+        self.assertEqual(range_to_index("A1"), (0, 0, 0, 0))
+        self.assertEqual(range_to_index("$B$3:$D$8"), (2, 1, 7, 3))
 
-    def test_range_address(self):
-        self.assertEqual(range_address(2, 1, 7, 3), "B3:D8")
-        self.assertEqual(range_address(0, 0, 0, 0), "A1:A1")
+    def test_index_to_range(self):
+        self.assertEqual(index_to_range(2, 1, 7, 3), "B3:D8")
+        self.assertEqual(index_to_range(0, 0, 0, 0), "A1:A1")
 
     def test_dollar_and_case(self):
-        self.assertEqual(cell_index("$A$1"), (0, 0))
-        self.assertEqual(cell_index("$c$8"), (7, 2))
+        self.assertEqual(cell_to_index("$A$1"), (0, 0))
+        self.assertEqual(cell_to_index("$c$8"), (7, 2))
         self.assertEqual(column_to_index("aa"), 26)
         self.assertEqual(index_to_column(26), "AA")
 
@@ -54,11 +54,11 @@ class TestAddress(unittest.TestCase):
 
     def test_invalid(self):
         with self.assertRaises(InvalidAddressError):
-            cell_index("")
+            cell_to_index("")
         with self.assertRaises(InvalidAddressError):
-            cell_index("1A")
+            cell_to_index("1A")
         with self.assertRaises(InvalidAddressError):
-            cell_index("A0")
+            cell_to_index("A0")
         with self.assertRaises(InvalidAddressError):
             column_to_index("A1")
 

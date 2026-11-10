@@ -24,7 +24,7 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 | 公式计算 | `wb.calculate()` 在 Python 端计算常用公式并缓存结果 |
 | 文件读写 | XLSX（纯标准库）、XLS（xlrd/xlwt，随包安装）、CSV/TSV（标准库） |
 | 图片插入 | XLSX 支持 PNG/JPEG：浮动锚定或完全嵌入单元格（随行高列宽缩放），支持读写往返 |
-| 地址转换 | `cell_index`/`cell_address`/`range_index`/`range_address`/`column_to_index`/`index_to_column`，支持 `$A$1` |
+| 地址转换 | `cell_to_index`/`index_to_cell`/`range_to_index`/`index_to_range`/`column_to_index`/`index_to_column`，支持 `$A$1` |
 | 模板渲染 | 标量标签 `{title}`、`{loop items}` 循环行块、数值表达式、格式过滤 |
 | 辅助功能 | 合并单元格、冻结窗格、自动筛选、页面打印设置 |
 
@@ -112,7 +112,7 @@ print(ws2["C2"].value)  # 190.0（公式计算结果）
 ```python
 from excelkit import (
     Workbook, Worksheet, Cell, CellValue, Range, Image,
-    cell_index, cell_address, range_index, range_address,
+    cell_to_index, index_to_cell, range_to_index, index_to_range,
     column_to_index, index_to_column,
     XLSX_MAX_ROWS, XLSX_MAX_COLUMNS, XLS_MAX_ROWS, XLS_MAX_COLUMNS,
 )
@@ -377,17 +377,17 @@ ws.clear_images()
 
 ```python
 from excelkit import (
-    cell_index, cell_address, range_index, range_address,
+    cell_to_index, index_to_cell, range_to_index, index_to_range,
     column_to_index, index_to_column,
     XLSX_MAX_ROWS, XLSX_MAX_COLUMNS, XLS_MAX_ROWS, XLS_MAX_COLUMNS,
 )
 
-cell_index("C8")                # (7, 2)  先行后列，0-based
-cell_index("$C$8")              # (7, 2)  支持绝对引用符号
-cell_address(7, 2)              # "C8"
-range_index("B3:D8")            # (2, 1, 7, 3)
-range_index("$B$3:$D$8")        # (2, 1, 7, 3)
-range_address(2, 1, 7, 3)       # "B3:D8"
+cell_to_index("C8")                # (7, 2)  先行后列，0-based
+cell_to_index("$C$8")              # (7, 2)  支持绝对引用符号
+index_to_cell(7, 2)              # "C8"
+range_to_index("B3:D8")            # (2, 1, 7, 3)
+range_to_index("$B$3:$D$8")        # (2, 1, 7, 3)
+index_to_range(2, 1, 7, 3)       # "B3:D8"
 column_to_index("AA")           # 26（支持大小写）
 index_to_column(26)             # "AA"
 ```
@@ -671,7 +671,7 @@ XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式�
 | `Worksheet` | `["A1"]`, `cell()`, `range()`, `append()`, `append_rows()`, `values`, `used_range`, `merge()`, `freeze_panes`, `auto_filter`, `page`, `find()`, `replace()`, `export()`, `tab_color`, `add_image()`, `images`, `remove_image()`, `clear_images()` |
 | `Cell` | `value`, `formula`, `style`, `read()`, `as_int()`, `as_float()`, `as_bool()`, `as_date()`, `as_datetime()`, `set_value()`, `copy_style()` |
 | `Range` | `values`, `set_values()`, `clear()`, `copy_to()`, `merge()`, `unmerge()`, `to_records()`, `address` |
-| 顶层函数 | `cell_index()`, `cell_address()`, `range_index()`, `range_address()`, `column_to_index()`, `index_to_column()`，常量 `XLSX_MAX_ROWS/COLUMNS`、`XLS_MAX_ROWS/COLUMNS` |
+| 顶层函数 | `cell_to_index()`, `index_to_cell()`, `range_to_index()`, `index_to_range()`, `column_to_index()`, `index_to_column()`，常量 `XLSX_MAX_ROWS/COLUMNS`、`XLS_MAX_ROWS/COLUMNS` |
 
 ---
 

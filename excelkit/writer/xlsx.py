@@ -12,7 +12,7 @@ import zipfile
 from datetime import date, datetime
 from xml.etree import ElementTree as ET
 
-from excelkit.address import cell_address, range_index
+from excelkit.address import index_to_cell, range_to_index
 from excelkit.core.image import EMU_PER_PIXEL
 from excelkit.errors import InvalidFileError
 
@@ -293,7 +293,7 @@ def _build_drawing_xml(ws, sheet_index: int, media_map: dict[int, str]) -> tuple
         if img.mode == "embed":
             anchor_el = ET.SubElement(root, f"{{{_NS_XDR}}}twoCellAnchor")
             anchor_el.set("editAs", "twoCell")
-            min_r, min_c, max_r, max_c = range_index(img.anchor)
+            min_r, min_c, max_r, max_c = range_to_index(img.anchor)
             # from: 左上角
             frm = ET.SubElement(anchor_el, f"{{{_NS_XDR}}}from")
             ET.SubElement(frm, f"{{{_NS_XDR}}}col").text = str(min_c)
@@ -313,11 +313,11 @@ def _build_drawing_xml(ws, sheet_index: int, media_map: dict[int, str]) -> tuple
             anchor_el = ET.SubElement(root, f"{{{_NS_XDR}}}oneCellAnchor")
             # anchor 可能是区域形式？float 通常用单格
             if ":" in img.anchor:
-                min_r, min_c, _, _ = range_index(img.anchor)
+                min_r, min_c, _, _ = range_to_index(img.anchor)
             else:
-                from excelkit.address import cell_index
+                from excelkit.address import cell_to_index
 
-                min_r, min_c = cell_index(img.anchor)
+                min_r, min_c = cell_to_index(img.anchor)
             frm = ET.SubElement(anchor_el, f"{{{_NS_XDR}}}from")
             ET.SubElement(frm, f"{{{_NS_XDR}}}col").text = str(min_c)
             ET.SubElement(frm, f"{{{_NS_XDR}}}colOff").text = str(max(0, img.offset[0]) * EMU_PER_PIXEL)
@@ -385,11 +385,11 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
     for img in getattr(ws, "_images", ()):
         try:
             if img.mode == "embed" or ":" in img.anchor:
-                ar1, ac1, ar2, ac2 = range_index(img.anchor)
+                ar1, ac1, ar2, ac2 = range_to_index(img.anchor)
                 if ar2 > max_r: max_r = ar2
                 if ac2 > max_c: max_c = ac2
             else:
-                from excelkit.address import cell_index as _ci_img
+                from excelkit.address import cell_to_index as _ci_img
                 ar, ac = _ci_img(img.anchor)
                 if ar > max_r: max_r = ar
                 if ac > max_c: max_c = ac
@@ -403,7 +403,7 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
     freeze = getattr(ws, "_freeze_panes", None)
     if freeze:
         try:
-            from excelkit.address import cell_index as _ci
+            from excelkit.address import cell_to_index as _ci
             fr, fc = _ci(freeze)
             if fr > 0 or fc > 0:
                 views = ET.SubElement(root, _q("sheetViews"))

@@ -8,7 +8,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any
 
-from excelkit.address import cell_index, range_index
+from excelkit.address import cell_to_index, range_to_index
 from excelkit.errors import InvalidAddressError, InvalidFileError
 
 
@@ -149,9 +149,9 @@ def create_image(
     # 校验锚点
     try:
         if ":" in str(anchor):
-            range_index(anchor)
+            range_to_index(anchor)
         else:
-            cell_index(anchor)
+            cell_to_index(anchor)
     except InvalidAddressError:
         raise
     if mode not in ("float", "embed"):
@@ -201,10 +201,10 @@ def create_image(
 
 def _normalize_range_anchor(anchor: str) -> str:
     """规范化区域锚点为大写 A1:B2 形式。"""
-    r1, c1, r2, c2 = range_index(anchor)
-    from excelkit.address import range_address
+    r1, c1, r2, c2 = range_to_index(anchor)
+    from excelkit.address import index_to_range
 
-    return range_address(r1, c1, r2, c2)
+    return index_to_range(r1, c1, r2, c2)
 
 
 __all__ = ["Image", "create_image", "EMU_PER_PIXEL"]

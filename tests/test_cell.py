@@ -22,7 +22,7 @@ class TestCellReadWrite(unittest.TestCase):
         self.ws["B1"] = 42
         self.assertEqual(self.ws["B1"].value, 42)
 
-    def test_cell_index_address(self):
+    def test_cell_to_index_address(self):
         cell = self.ws.cell(2, 2)
         self.assertEqual(cell.index, (2, 2))
         self.assertEqual(cell.address, "C3")

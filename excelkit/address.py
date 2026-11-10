@@ -1,8 +1,8 @@
 """A1 地址与 0-based 行列索引的互相转换工具。
 
 所有数字索引统一为 0-based，行列参数统一为先行、后列：
-    cell_index("C8") == (7, 2)        # 先行后列
-    range_index("B3:D8") == (2, 1, 7, 3)  # (min_row, min_col, max_row, max_col)
+    cell_to_index("C8") == (7, 2)        # 先行后列
+    range_to_index("B3:D8") == (2, 1, 7, 3)  # (min_row, min_col, max_row, max_col)
 
 A1 字符串地址遵循 Excel 原生表示（1-based 列字母 + 1-based 行号）。
 支持绝对引用符号 `$`（如 `$A$1`），解析时会自动去除。
@@ -66,7 +66,7 @@ def _normalize_address(address: str) -> str:
     return address.strip().replace("$", "")
 
 
-def cell_index(address: str) -> tuple[int, int]:
+def cell_to_index(address: str) -> tuple[int, int]:
     """把 A1 地址解析为 (row, column) 0-based 元组，先行后列。
 
     例如 "C8" -> (7, 2)，"$C$8" -> (7, 2)。
@@ -86,7 +86,7 @@ def cell_index(address: str) -> tuple[int, int]:
     return (row, column)
 
 
-def cell_address(row: int, column: int) -> str:
+def index_to_cell(row: int, column: int) -> str:
     """把 (row, column) 0-based 索引转为 A1 地址字符串。
 
     例如 (7, 2) -> "C8"。
@@ -98,7 +98,7 @@ def cell_address(row: int, column: int) -> str:
     return f"{index_to_column(column)}{row + 1}"
 
 
-def range_index(address: str) -> tuple[int, int, int, int]:
+def range_to_index(address: str) -> tuple[int, int, int, int]:
     """把 A1 区域地址解析为 (min_row, min_col, max_row, max_col) 0-based 元组。
 
     例如 "B3:D8" -> (2, 1, 7, 3)，"$B$3:$D$8" -> (2, 1, 7, 3)。
@@ -126,7 +126,7 @@ def range_index(address: str) -> tuple[int, int, int, int]:
     return (min_row, min_col, max_row, max_col)
 
 
-def range_address(min_row: int, min_col: int, max_row: int, max_col: int) -> str:
+def index_to_range(min_row: int, min_col: int, max_row: int, max_col: int) -> str:
     """把 (min_row, min_col, max_row, max_col) 0-based 转为 A1 区域地址。
 
     例如 (2, 1, 7, 3) -> "B3:D8"。
@@ -134,7 +134,7 @@ def range_address(min_row: int, min_col: int, max_row: int, max_col: int) -> str
     """
     if min_row > max_row or min_col > max_col:
         raise InvalidAddressError("区域起止索引顺序无效")
-    return f"{cell_address(min_row, min_col)}:{cell_address(max_row, max_col)}"
+    return f"{index_to_cell(min_row, min_col)}:{index_to_cell(max_row, max_col)}"
 
 
 __all__ = [
@@ -144,8 +144,8 @@ __all__ = [
     "XLSX_MAX_COLUMNS",
     "column_to_index",
     "index_to_column",
-    "cell_index",
-    "cell_address",
-    "range_index",
-    "range_address",
+    "cell_to_index",
+    "index_to_cell",
+    "range_to_index",
+    "index_to_range",
 ]

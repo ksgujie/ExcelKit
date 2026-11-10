@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from excelkit.address import cell_address, cell_index
 from excelkit.errors import InvalidAddressError, InvalidFileError, InvalidWorksheetNameError
 from excelkit.core.worksheet import Worksheet
 

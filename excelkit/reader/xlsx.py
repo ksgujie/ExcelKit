@@ -10,7 +10,7 @@ import re
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
-from excelkit.address import cell_index, range_address, range_index
+from excelkit.address import cell_to_index, index_to_range, range_to_index
 from excelkit.core.image import EMU_PER_PIXEL, Image, _detect_image
 from excelkit.errors import InvalidAddressError, InvalidFileError
 
@@ -136,7 +136,7 @@ def _load_sheet_images(zip_file: ZipFile, sheet_part: str, sheet_root) -> list[I
             ext = anchor.find(f"{_XDR}ext")
             if frm is not None:
                 col, col_off, row, row_off = _parse_marker(frm)
-                from excelkit.address import cell_address as _ca
+                from excelkit.address import index_to_cell as _ca
 
                 anchor_ref = _ca(row, col)
                 off = (max(0, round(col_off / EMU_PER_PIXEL)), max(0, round(row_off / EMU_PER_PIXEL)))
@@ -160,7 +160,7 @@ def _load_sheet_images(zip_file: ZipFile, sheet_part: str, sheet_root) -> list[I
                 max_c = c2 - 1 if (co2 == 0 and ro2 == 0 and c2 > c1) else c2
                 max_r = max(r1, max_r)
                 max_c = max(c1, max_c)
-                anchor_ref = range_address(r1, c1, max_r, max_c)
+                anchor_ref = index_to_range(r1, c1, max_r, max_c)
             mode = "embed" if edit_as == "twoCell" else "float"
         else:
             continue
@@ -333,7 +333,7 @@ def load_xlsx(filename: str) -> "Workbook":
                 ref = mc.get("ref")
                 if ref and ":" in ref:
                     try:
-                        r1, c1, r2, c2 = range_index(ref)
+                        r1, c1, r2, c2 = range_to_index(ref)
                         ws._merge_cells(r1, c1, r2, c2)
                     except (ValueError, KeyError, IndexError, InvalidAddressError):
                         pass

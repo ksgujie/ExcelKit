@@ -220,7 +220,7 @@ class _FormulaParser:
         if ":" in ref:
             rng = sheet.range(ref)
             return rng.values
-        row, col = cell_index(ref)
+        row, col = cell_to_index(ref)
         return sheet._get_cell_value(row, col)
 
 
@@ -425,8 +425,8 @@ def _apply_function(name: str, args: list[Any]) -> Any:
 
 # ---------- 地址解析（延迟导入避免循环） ----------
 
-def cell_index(address: str) -> tuple[int, int]:
-    from excelkit.address import cell_index as _ci
+def cell_to_index(address: str) -> tuple[int, int]:
+    from excelkit.address import cell_to_index as _ci
 
     return _ci(address)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from excelkit.address import range_address, range_index
+from excelkit.address import index_to_range, range_to_index
 from excelkit.errors import ExcelKitError, InvalidAddressError
 
 
@@ -13,14 +13,14 @@ class Range:
 
     def __init__(self, worksheet: "Worksheet", address: str) -> None:
         self._worksheet = worksheet
-        self.min_row, self.min_column, self.max_row, self.max_column = range_index(address)
+        self.min_row, self.min_column, self.max_row, self.max_column = range_to_index(address)
 
     @property
     def address(self) -> str:
         """规范化的 A1 区域地址。"""
-        from excelkit.address import range_address
+        from excelkit.address import index_to_range
 
-        return range_address(
+        return index_to_range(
             self.min_row, self.min_column, self.max_row, self.max_column
         )
 

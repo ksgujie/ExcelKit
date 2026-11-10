@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from excelkit.address import cell_address, cell_index, range_address, range_index
+from excelkit.address import index_to_cell, cell_to_index, index_to_range, range_to_index
 from excelkit.errors import InvalidAddressError, InvalidWorksheetNameError
 from excelkit.style import Style
 from excelkit.core.dimension import ColumnDimension, RowDimension
@@ -116,7 +116,7 @@ class Worksheet:
     @freeze_panes.setter
     def freeze_panes(self, value: str | None) -> None:
         if value is not None:
-            cell_index(value)  # 校验地址
+            cell_to_index(value)  # 校验地址
         self._freeze_panes = value
 
     @property
@@ -173,10 +173,10 @@ class Worksheet:
         # embed 模式：若锚点为单个单元格且该单元格是某合并区域左上角，则自动扩展为整个合并区域
         if img.mode == "embed" and ":" not in img.anchor:
             try:
-                r, c = cell_index(img.anchor)
+                r, c = cell_to_index(img.anchor)
                 for mr1, mc1, mr2, mc2 in self._merged:
                     if mr1 == r and mc1 == c:
-                        img.anchor = range_address(mr1, mc1, mr2, mc2)
+                        img.anchor = index_to_range(mr1, mc1, mr2, mc2)
                         break
             except Exception:
                 pass
@@ -360,7 +360,7 @@ class Worksheet:
         """返回实际使用对象覆盖的最小 Range，空表为 None。"""
         if self._max_row == -1 or self._max_column == -1:
             return None
-        return self.range(range_address(0, 0, self._max_row, self._max_column))
+        return self.range(index_to_range(0, 0, self._max_row, self._max_column))
 
     # ---------- 校验 ----------
 
@@ -377,7 +377,7 @@ class Worksheet:
                     and m1[3] >= m2[1]
                 ):
                     problems.append(
-                        f"合并区域重叠：{range_address(*m1)} 与 {range_address(*m2)}"
+                        f"合并区域重叠：{index_to_range(*m1)} 与 {index_to_range(*m2)}"
                     )
         return problems
 
@@ -391,7 +391,7 @@ class Worksheet:
         has_header: bool = False,
     ) -> "Worksheet":
         """按 SortKey 对连续区域排序（简化版：仅支持按单列升序/降序）。"""
-        min_r, min_c, max_r, max_c = range_index(address)
+        min_r, min_c, max_r, max_c = range_to_index(address)
         data_start = min_r + 1 if has_header else min_r
         if data_start > max_r:
             return self
@@ -515,7 +515,7 @@ class _AutoFilterProxy:
     @range.setter
     def range(self, value: str | None) -> None:
         if value is not None:
-            range_index(value)  # 校验
+            range_to_index(value)  # 校验
         self._ws._auto_filter_range = value
 
     def set(self, address: str) -> "_AutoFilterProxy":

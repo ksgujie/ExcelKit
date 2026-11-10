@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from excelkit.address import cell_address, cell_index
+from excelkit.address import index_to_cell, cell_to_index
 from excelkit.errors import InvalidAddressError
 from excelkit.style import Style
 
@@ -163,7 +163,7 @@ class Cell:
     def __init__(self, worksheet: "Worksheet", address_or_row: str | int, column: int | None = None) -> None:
         self._worksheet = worksheet
         if isinstance(address_or_row, str):
-            self._row, self._column = cell_index(address_or_row)
+            self._row, self._column = cell_to_index(address_or_row)
         else:
             if column is None:
                 raise InvalidAddressError("cell() 需要行列两个整数参数，或一个 A1 地址字符串")
@@ -190,7 +190,7 @@ class Cell:
     @property
     def address(self) -> str:
         """规范化的 A1 地址。"""
-        return cell_address(self._row, self._column)
+        return index_to_cell(self._row, self._column)
 
     # ---------- 值与公式 ----------
 
