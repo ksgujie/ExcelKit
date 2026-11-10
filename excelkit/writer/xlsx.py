@@ -125,38 +125,50 @@ def _style_key(style) -> tuple:
 
 
 def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
-    """生成 styles.xml 内容。"""
+    """生成 styles.xml 内容（包含 Excel 兼容的默认样式定义）。"""
     style_items = sorted(style_objects.items(), key=lambda kv: kv[0])
 
     root = ET.Element(_q("styleSheet"))
+
+    # fonts: index 0 = default Calibri 11
     fonts = ET.SubElement(root, _q("fonts"))
     fonts.set("count", str(len(style_items) + 1))
-    ET.SubElement(fonts, _q("font"))
+    font0 = ET.SubElement(fonts, _q("font"))
+    ET.SubElement(font0, _q("sz")).set("val", "11")
+    ET.SubElement(font0, _q("color")).set("theme", "1")
+    ET.SubElement(font0, _q("name")).set("val", "Calibri")
+    ET.SubElement(font0, _q("family")).set("val", "2")
+    ET.SubElement(font0, _q("scheme")).set("val", "minor")
     for idx, style in style_items:
         font_el = ET.SubElement(fonts, _q("font"))
         if style.font:
             f = style.font
-            if f.name:
-                ET.SubElement(font_el, _q("name")).set("val", f.name)
-            if f.size:
-                ET.SubElement(font_el, _q("sz")).set("val", str(f.size))
+            ET.SubElement(font_el, _q("sz")).set("val", str(f.size if f.size else 11))
+            if f.color:
+                ET.SubElement(font_el, _q("color")).set("rgb", f.color)
+            else:
+                ET.SubElement(font_el, _q("color")).set("theme", "1")
+            ET.SubElement(font_el, _q("name")).set("val", f.name if f.name else "Calibri")
+            ET.SubElement(font_el, _q("family")).set("val", "2")
             if f.bold:
                 ET.SubElement(font_el, _q("b"))
             if f.italic:
                 ET.SubElement(font_el, _q("i"))
             if f.underline:
                 ET.SubElement(font_el, _q("u"))
-            if f.color:
-                ET.SubElement(font_el, _q("color")).set("rgb", f.color)
         else:
-            ET.SubElement(font_el, _q("name")).set("val", "Calibri")
             ET.SubElement(font_el, _q("sz")).set("val", "11")
+            ET.SubElement(font_el, _q("color")).set("theme", "1")
+            ET.SubElement(font_el, _q("name")).set("val", "Calibri")
+            ET.SubElement(font_el, _q("family")).set("val", "2")
 
+    # fills: index 0 = none, index 1 = gray125 (Excel 默认要求)
     fills = ET.SubElement(root, _q("fills"))
     fills.set("count", str(len(style_items) + 2))
-    ET.SubElement(fills, _q("fill"))
-    pf_def = ET.SubElement(ET.SubElement(fills, _q("fill")), _q("patternFill"))
-    pf_def.set("patternType", "none")
+    pf0 = ET.SubElement(ET.SubElement(fills, _q("fill")), _q("patternFill"))
+    pf0.set("patternType", "none")
+    pf1 = ET.SubElement(ET.SubElement(fills, _q("fill")), _q("patternFill"))
+    pf1.set("patternType", "gray125")
     for idx, style in style_items:
         fill_el = ET.SubElement(fills, _q("fill"))
         pf = ET.SubElement(fill_el, _q("patternFill"))
@@ -164,27 +176,53 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
         if style.fill and style.fill.fg_color:
             ET.SubElement(pf, _q("fgColor")).set("rgb", style.fill.fg_color)
 
+    # borders: index 0 = empty border
     borders = ET.SubElement(root, _q("borders"))
     borders.set("count", str(len(style_items) + 1))
-    ET.SubElement(borders, _q("border"))
+
+    def _empty_border(parent):
+        b = ET.SubElement(parent, _q("border"))
+        ET.SubElement(b, _q("left"))
+        ET.SubElement(b, _q("right"))
+        ET.SubElement(b, _q("top"))
+        ET.SubElement(b, _q("bottom"))
+        ET.SubElement(b, _q("diagonal"))
+        return b
+
+    _empty_border(borders)
     for idx, style in style_items:
-        border_el = ET.SubElement(borders, _q("border"))
         if style.border:
+            b_el = ET.SubElement(borders, _q("border"))
             b = style.border
-            for side_name, side in (("top", b.top), ("bottom", b.bottom), ("left", b.left), ("right", b.right)):
+            for side_name, side in (("left", b.left), ("right", b.right), ("top", b.top), ("bottom", b.bottom)):
+                side_el = ET.SubElement(b_el, _q(side_name))
                 if side and side.style:
-                    side_el = ET.SubElement(border_el, _q(side_name))
                     side_el.set("style", side.style)
                     if side.color:
                         ET.SubElement(side_el, _q("color")).set("rgb", side.color)
+            ET.SubElement(b_el, _q("diagonal"))
+        else:
+            _empty_border(borders)
 
+    # cellStyleXfs
     cell_style_xfs = ET.SubElement(root, _q("cellStyleXfs"))
     cell_style_xfs.set("count", "1")
-    ET.SubElement(cell_style_xfs, _q("xf")).set("xfId", "0")
+    csxf = ET.SubElement(cell_style_xfs, _q("xf"))
+    csxf.set("numFmtId", "0")
+    csxf.set("fontId", "0")
+    csxf.set("fillId", "0")
+    csxf.set("borderId", "0")
 
+    # cellXfs
     cell_xfs = ET.SubElement(root, _q("cellXfs"))
     cell_xfs.set("count", str(len(style_items) + 1))
-    ET.SubElement(cell_xfs, _q("xf"))
+    xf0 = ET.SubElement(cell_xfs, _q("xf"))
+    xf0.set("numFmtId", "0")
+    xf0.set("fontId", "0")
+    xf0.set("fillId", "0")
+    xf0.set("borderId", "0")
+    xf0.set("xfId", "0")
+
     num_fmts = None
     for idx, style in style_items:
         xf = ET.SubElement(cell_xfs, _q("xf"))
@@ -193,15 +231,19 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
         apply_border = style.border is not None
         apply_align = style.alignment is not None
         apply_numfmt = style.number_format is not None
-        xf.set("applyFont", "1" if apply_font else "0")
-        xf.set("applyFill", "1" if apply_fill else "0")
-        xf.set("applyBorder", "1" if apply_border else "0")
-        xf.set("applyAlignment", "1" if apply_align else "0")
-        xf.set("applyNumberFormat", "1" if apply_numfmt else "0")
+        xf.set("numFmtId", "0")
         xf.set("fontId", str(idx))
         xf.set("fillId", str(idx + 1))
         xf.set("borderId", str(idx))
+        xf.set("xfId", "0")
+        if apply_font:
+            xf.set("applyFont", "1")
+        if apply_fill:
+            xf.set("applyFill", "1")
+        if apply_border:
+            xf.set("applyBorder", "1")
         if apply_align:
+            xf.set("applyAlignment", "1")
             al = ET.SubElement(xf, _q("alignment"))
             if style.alignment.horizontal:
                 al.set("horizontal", style.alignment.horizontal)
@@ -209,6 +251,8 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
                 al.set("vertical", style.alignment.vertical)
             if style.alignment.wrap_text:
                 al.set("wrapText", "1")
+            if getattr(style.alignment, "indent", None):
+                al.set("indent", str(style.alignment.indent))
         if apply_numfmt:
             if num_fmts is None:
                 num_fmts = ET.SubElement(root, _q("numFmts"))
@@ -219,10 +263,10 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
             nf.set("numFmtId", str(164 + idx))
             nf.set("formatCode", style.number_format)
             xf.set("numFmtId", str(164 + idx))
-    # numFmts must appear before fonts in strict schema? Actually order is numFmts, fonts, fills, borders...
-    # We appended numFmts after cellXfs when needed - that's wrong for schema. Fix by rebuilding if needed.
+            xf.set("applyNumberFormat", "1")
+
+    # numFmts must appear before fonts
     if num_fmts is not None:
-        # move numFmts to front (index 0)
         root.remove(num_fmts)
         root.insert(0, num_fmts)
 
@@ -537,6 +581,8 @@ def save_xlsx(workbook, filename: str, *, formulas: bool = False) -> None:
 
     # workbook.xml
     wb_root = ET.Element(_q("workbook"))
+    book_views = ET.SubElement(wb_root, _q("bookViews"))
+    ET.SubElement(book_views, _q("workbookView")).set("activeTab", str(min(getattr(workbook, "_active_index", 0), max(0, len(sheets_xml) - 1))))
     sheets_el = ET.SubElement(wb_root, _q("sheets"))
     for i, (name, _) in enumerate(sheets_xml):
         sheet_el = ET.SubElement(sheets_el, _q("sheet"))

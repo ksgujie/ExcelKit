@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 from typing import Any
 
 from excelkit.address import index_to_cell, cell_to_index, index_to_range, range_to_index
@@ -325,19 +327,45 @@ class Worksheet:
             self._set_cell_value(start_row, c_idx, val, formula=None)
         return self
 
-    def append_rows(self, rows: list[list[Any]]) -> "Worksheet":
-        """原子校验并连续追加二维数据。"""
+    def append_rows(self, rows: list[list[Any]], *, on_mismatch: str = "warn") -> "Worksheet":
+        """追加多行数据。
+
+        参数:
+            rows: 二维数据。
+            on_mismatch: 列数与首行不一致时的处理策略。
+                - "warn"（默认）：允许参差行，按实际列数写入，并对不一致行发出警告。
+                - "error": 严格矩形校验，不一致时抛出 ValueError 且不写入任何数据。
+                - "ignore": 允许参差行，按实际列数写入，不发出警告。
+        """
         if not rows:
             return self
+        if on_mismatch not in ("warn", "error", "ignore"):
+            raise ValueError("on_mismatch 必须是 'warn'、'error' 或 'ignore'")
+
         start_row = 0 if self._max_row == -1 else self._max_row + 1
-        # 先全量校验列数一致
         col_count = len(rows[0])
-        for i, row_vals in enumerate(rows):
-            if len(row_vals) != col_count:
-                raise InvalidWorksheetNameError(
-                    f"第 {i} 行列数 {len(row_vals)} 与首行列数 {col_count} 不一致"
-                )
-        # 再写入
+
+        if on_mismatch == "error":
+            # 先全量校验，保持原子性
+            for i, row_vals in enumerate(rows):
+                if len(row_vals) != col_count:
+                    raise ValueError(
+                        f"第 {i} 行列数 {len(row_vals)} 与首行列数 {col_count} 不一致"
+                    )
+            for r_idx, row_vals in enumerate(rows):
+                for c_idx, val in enumerate(row_vals):
+                    self._set_cell_value(start_row + r_idx, c_idx, val, formula=None)
+            return self
+
+        # warn/ignore：允许参差行
+        if on_mismatch == "warn":
+            for i, row_vals in enumerate(rows):
+                if len(row_vals) != col_count:
+                    warnings.warn(
+                        f"append_rows 第 {i} 行列数 {len(row_vals)} 与首行列数 {col_count} 不一致，将按实际列数写入",
+                        UserWarning,
+                        stacklevel=2,
+                    )
         for r_idx, row_vals in enumerate(rows):
             for c_idx, val in enumerate(row_vals):
                 self._set_cell_value(start_row + r_idx, c_idx, val, formula=None)
@@ -523,10 +551,13 @@ class _AutoFilterProxy:
         self.range = address
         return self
 
-    def apply(self) -> "_AutoFilterProxy":
-        """应用筛选并隐藏不匹配行（精简版暂不隐藏行，仅记录已应用）。"""
+    def enable(self) -> "_AutoFilterProxy":
+        """启用自动筛选区域（显示筛选下拉；当前不执行按条件隐藏行）。"""
         return self
 
+    def apply(self) -> "_AutoFilterProxy":
+        """enable() 的兼容别名。"""
+        return self.enable()
     def clear(self) -> None:
         self._ws._auto_filter_range = None
 
