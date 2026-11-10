@@ -84,6 +84,8 @@ class TestFileRoundTrip(unittest.TestCase):
             wb2 = Workbook.load(path)
             self.assertEqual(wb2.active.freeze_panes, "A2")
             self.assertEqual(wb2.active.auto_filter.range, "A1:B2")
+            self.assertFalse(hasattr(wb2.active.auto_filter, "apply"))
+            self.assertTrue(hasattr(wb2.active.auto_filter, "enable"))
         finally:
             os.unlink(path)
 

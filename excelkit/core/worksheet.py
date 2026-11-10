@@ -555,9 +555,6 @@ class _AutoFilterProxy:
         """启用自动筛选区域（显示筛选下拉；当前不执行按条件隐藏行）。"""
         return self
 
-    def apply(self) -> "_AutoFilterProxy":
-        """enable() 的兼容别名。"""
-        return self.enable()
     def clear(self) -> None:
         self._ws._auto_filter_range = None
 
