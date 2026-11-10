@@ -20,19 +20,19 @@ class TestWorkbookBasic(unittest.TestCase):
         self.assertIsNotNone(self.wb.active)
         ws2 = self.wb.add_sheet("销售")
         self.assertEqual(ws2.name, "销售")
-        self.assertIs(self.wb.sheet("销售"), ws2)
-        self.assertIs(self.wb.sheet(0), self.ws)
-        self.assertIs(self.wb.sheet(1), ws2)
+        self.assertIs(self.wb.get_sheet("销售"), ws2)
+        self.assertIs(self.wb.get_sheet(0), self.ws)
+        self.assertIs(self.wb.get_sheet(1), ws2)
 
     def test_sheet_name_case_insensitive(self):
         self.ws.name = "MySheet"
-        self.assertIs(self.wb.sheet("mysheet"), self.ws)
+        self.assertIs(self.wb.get_sheet("mysheet"), self.ws)
 
     def test_remove_sheet(self):
         self.wb.add_sheet("Tmp")
         self.wb.remove_sheet("Tmp")
         with self.assertRaises(InvalidWorksheetNameError):
-            self.wb.sheet("Tmp")
+            self.wb.get_sheet("Tmp")
 
     def test_move_sheet(self):
         self.wb.add_sheet("B")
@@ -43,7 +43,7 @@ class TestWorkbookBasic(unittest.TestCase):
     def test_copy_sheet(self):
         self.ws["A1"] = 1
         self.wb.copy_sheet("Sheet1", "副本")
-        self.assertEqual(self.wb.sheet("副本")["A1"].value, 1)
+        self.assertEqual(self.wb.get_sheet("副本")["A1"].value, 1)
 
     def test_invalid_sheet_name(self):
         with self.assertRaises(InvalidWorksheetNameError):
@@ -92,8 +92,8 @@ class TestTabColor(unittest.TestCase):
         try:
             wb.save(path)
             wb2 = Workbook.load(path)
-            self.assertEqual(wb2.sheet("Sheet1").tab_color, "FF4472C4")
-            self.assertIsNone(wb2.sheet("无颜色").tab_color)
+            self.assertEqual(wb2.get_sheet("Sheet1").tab_color, "FF4472C4")
+            self.assertIsNone(wb2.get_sheet("无颜色").tab_color)
         finally:
             os.unlink(path)
 
@@ -101,7 +101,7 @@ class TestTabColor(unittest.TestCase):
         wb = Workbook()
         wb.active.tab_color = "00FF00"
         wb.copy_sheet("Sheet1", "副本")
-        self.assertEqual(wb.sheet("副本").tab_color, "00FF00")
+        self.assertEqual(wb.get_sheet("副本").tab_color, "00FF00")
 
 
 if __name__ == "__main__":

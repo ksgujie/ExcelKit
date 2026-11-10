@@ -49,7 +49,7 @@ class Workbook:
         self._active_index = len(self._sheets) - 1
         return ws
 
-    def sheet(self, name_or_index: str | int) -> Worksheet:
+    def get_sheet(self, name_or_index: str | int) -> Worksheet:
         """按不区分大小写的标签或非负 0-based 索引返回工作表。"""
         if isinstance(name_or_index, bool) or not isinstance(name_or_index, int):
             key = str(name_or_index).lower()
@@ -62,7 +62,7 @@ class Workbook:
 
     def remove_sheet(self, name_or_index: str | int) -> Workbook:
         """删除工作表并返回当前工作簿。"""
-        ws = self.sheet(name_or_index)
+        ws = self.get_sheet(name_or_index)
         idx = self._sheets.index(ws)
         key = ws.name.lower()
         del self._name_index[key]
@@ -78,7 +78,7 @@ class Workbook:
 
     def move_sheet(self, name_or_index: str | int, index: int) -> Workbook:
         """移动工作表到指定 0-based 最终位置。"""
-        ws = self.sheet(name_or_index)
+        ws = self.get_sheet(name_or_index)
         cur = self._sheets.index(ws)
         if index < 0 or index > len(self._sheets) - 1:
             raise InvalidAddressError(f"目标位置超出范围：{index}")
@@ -92,7 +92,7 @@ class Workbook:
         """完整复制工作表（内容、布局、打印设置）。"""
         import copy
 
-        src = self.sheet(name_or_index)
+        src = self.get_sheet(name_or_index)
         new_ws = copy.deepcopy(src)
         new_ws._workbook = self
         # 先加入工作簿，再重命名（名称 setter 需 worksheet 已在 sheets 列表中）

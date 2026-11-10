@@ -213,7 +213,7 @@ class _FormulaParser:
     def _resolve_reference(self, ident: str) -> Any:
         if "!" in ident:
             sheet_name, ref = ident.split("!", 1)
-            sheet = self.workbook.sheet(sheet_name)
+            sheet = self.workbook.get_sheet(sheet_name)
         else:
             sheet = self.default_sheet or self.workbook.active
             ref = ident

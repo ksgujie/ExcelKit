@@ -493,7 +493,7 @@ class Worksheet:
 
     # ---------- 导出单表（简化） ----------
 
-    def export(self, filename: str, *, delimiter: str = ",") -> None:
+    def export_csv(self, filename: str, *, delimiter: str = ",") -> None:
         """将当前工作表导出为 CSV/TSV 文件。"""
         import csv
 
