@@ -15,9 +15,10 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 - 区域批量操作（range / values / set_values / clear / copy_to / merge / to_records）
 - 模板渲染（标量标签 + {loop items} / {/loop} 循环行块）
 - 基础公式计算（SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/AND/OR/NOT/ABS/INT/ROUND/CONCAT/LEN/LEFT/RIGHT/MID 等）
-- 合并单元格、冻结窗格、自动筛选（仅启用区域，无 apply() 别名；XLSX 持久化）、页面打印设置
+- 合并单元格、冻结窗格、自动筛选（仅启用区域，无 apply() 别名；XLSX/XLS 持久化）、页面打印设置
 
 - XLSX 字符串使用标准 inline string（`<is>` 元素）写出，兼容 Excel/WPS；读取端兼容旧版 `<inlineStr>` 文件
+- XLS 写出/读取支持自动筛选区域（Excel/WPS 中显示筛选下拉）；XLS 仍不写图片、合并单元格、冻结窗格、列宽
 
 ## 快速开始
 
@@ -45,7 +46,7 @@ print(wb2.active["C2"].value)   # 183.0
 ### 从 Wheel 安装（推荐）
 
 ```bash
-pip install --force-reinstall dist\excelkit-0.1.1-py3-none-any.whl
+pip install --force-reinstall dist\excelkit-0.1.2-py3-none-any.whl
 # 需要 XLS 支持时额外安装：
 pip install xlrd xlwt
 ```

@@ -1,6 +1,6 @@
 # ExcelKit精简版 使用文档
 
-> 版本：v0.1.1  
+> 版本：v0.1.2  
 > 项目根目录：`W:\ExcelKit`  
 > 适用环境：Python 3.8+
 
@@ -48,7 +48,7 @@ ExcelKit 是一个以实用为主的轻量级 Excel 读写库，基于原 GitHub
 
 ```bash
 # 在 W:\ExcelKit 目录下
-pip install --force-reinstall dist\excelkit-0.1.1-py3-none-any.whl
+pip install --force-reinstall dist\excelkit-0.1.2-py3-none-any.whl
 ```
 
 Wheel 已包含全部源码；`--force-reinstall` 可避免系统里残留同版本旧包。安装后确认实际导入的版本和路径：
@@ -57,7 +57,7 @@ Wheel 已包含全部源码；`--force-reinstall` 可避免系统里残留同版
 python -c "import excelkit; print(excelkit.__version__, excelkit.__file__)"
 ```
 
-输出应为 `0.1.1` 且路径位于当前 Python 环境的 `site-packages` 中。
+输出应为 `0.1.2` 且路径位于当前 Python 环境的 `site-packages` 中。
 
 ### 方式二：从源码安装
 
@@ -83,7 +83,7 @@ cd W:\ExcelKit
 python -m pip wheel . --no-deps --no-build-isolation -w dist
 ```
 
-生成文件：`dist\excelkit-0.1.1-py3-none-any.whl`。
+生成文件：`dist\excelkit-0.1.2-py3-none-any.whl`。
 
 ## 3. 快速入门
 
@@ -329,7 +329,7 @@ ws.auto_filter.clear()              # 清除筛选
 # 设置 range 即生效；没有 apply() 别名，也不会按条件隐藏行
 ```
 
-> XLSX 读写会持久化 `freeze_panes` 与 `auto_filter.range`。
+> XLSX 读写会持久化 `freeze_panes` 与 `auto_filter.range`；XLS 读写会持久化 `auto_filter.range`（Excel/WPS 中显示筛选下拉），但不持久化 `freeze_panes`。
 
 ### 6.6 行高、列宽、隐藏
 
@@ -681,6 +681,8 @@ wb.render(data, strict=False)   # 宽松：缺失标签清空，缺失循环视�
 | `.tsv` | ✅ | ✅ | 无（标准库） |
 
 XLS 公式只能取得文件中已有的缓存计算结果，无法恢复公式表达式。XLS 标签颜色因格式限制不写出。XLS 不支持写入图片；XLSX 支持 PNG/JPEG 图片读写往返，CSV/TSV 忽略图片。
+
+XLS 已支持写出/读取自动筛选区域（`auto_filter.range`），Excel/WPS 打开可见筛选下拉；但 XLS 目前仍不写合并单元格、冻结窗格、列高列宽。
 
 ---
 

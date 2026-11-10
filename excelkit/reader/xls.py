@@ -30,7 +30,47 @@ def load_xls(filename: str):
                 cell = sh.cell(r, c)
                 val = _xl_cell_value(cell, book.datemode)
                 ws._set_cell_value(r, c, val, formula=None)
+
+    _apply_auto_filters(workbook, book)
     return workbook
+
+
+def _apply_auto_filters(workbook, xls_book) -> None:
+    """从 ``_FilterDatabase`` 内置定义名还原每个工作表的自动筛选区域。"""
+    names = getattr(xls_book, "name_map", {}).get("_filterdatabase")
+    if not names:
+        return
+    if not isinstance(names, (list, tuple)):
+        names = [names]
+
+    from excelkit.address import index_to_cell, index_to_range
+
+    for name in names:
+        try:
+            if getattr(name, "scope", None) is None:
+                continue
+            result = name.result
+            coords = result.value[0].coords
+        except (AttributeError, IndexError, TypeError):
+            continue
+        if not coords or len(coords) != 6:
+            continue
+        sht_lo, sht_hi, row_lo, row_hi, col_lo, col_hi = coords
+        # 只支持单个工作表的引用；跨表引用跳过
+        if sht_hi - sht_lo != 1:
+            continue
+        if not (0 <= sht_lo < len(workbook.sheets)):
+            continue
+        if row_hi <= row_lo or col_hi <= col_lo:
+            continue
+        ws = workbook.sheets[sht_lo]
+        if row_hi - 1 == row_lo and col_hi - 1 == col_lo:
+            # 单格区域用 "A1" 表示，与 XLSX 读取结果保持一致
+            ws._auto_filter_range = index_to_cell(row_lo, col_lo)
+        else:
+            ws._auto_filter_range = index_to_range(
+                row_lo, col_lo, row_hi - 1, col_hi - 1
+            )
 
 
 def _xl_cell_value(cell, datemode: int):

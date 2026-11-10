@@ -1,6 +1,7 @@
 """文件读写往返测试。"""
 
 import os
+import struct
 import sys
 import tempfile
 import zipfile
@@ -152,6 +153,58 @@ class TestFileRoundTrip(unittest.TestCase):
             os.replace(tmp, path)
             wb2 = Workbook.load(path)
             self.assertEqual(wb2.active["A1"].value, "旧格式")
+        finally:
+            os.unlink(path)
+
+
+    def test_xls_autofilter_roundtrip(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "姓名"
+        ws["B1"] = "成绩"
+        ws["A2"] = "张三"
+        ws["B2"] = 95
+        ws["A3"] = "李四"
+        ws["B3"] = 60
+        ws.auto_filter.set("A1:B3")
+        ws.auto_filter.enable()
+        with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.active.auto_filter.range, "A1:B3")
+            self.assertEqual(wb2.active["A2"].value, "张三")
+            self.assertEqual(wb2.active["B2"].value, 95)
+        finally:
+            os.unlink(path)
+
+    def test_xls_autofilter_writes_biff_records(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "h1"
+        ws.auto_filter.range = "C3:D6"
+        with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            try:
+                import xlrd.compdoc as compdoc
+            except ImportError:
+                self.skipTest("需要 xlrd 才能解析 XLS 二进制流")
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            stream = compdoc.CompDoc(raw).get_named_stream("Workbook")
+            sids = []
+            pos = 0
+            while pos + 4 <= len(stream):
+                sid, length = struct.unpack_from("<HH", stream, pos)
+                sids.append(sid)
+                pos += 4 + length
+            self.assertIn(0x009D, sids)  # AUTOFILTERINFO
+            self.assertIn(0x0018, sids)  # NAME（_FilterDatabase）
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.active.auto_filter.range, "C3:D6")
         finally:
             os.unlink(path)
 
