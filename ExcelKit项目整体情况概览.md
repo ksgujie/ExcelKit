@@ -144,7 +144,7 @@ Wheel 全新虚拟环境验证（`W:\eyes\Temp\opencode\venv012`）：
 - 新增：XLS 自动筛选写入/读取测试（`tests/test_file.py`，共 9 个用例）。
 - 修改：版本号 0.1.1 → 0.1.2；README、使用文档、本概览同步。
 - 验证：68 tests OK；Excel COM 四个场景全部正确；Wheel 全新 venv 复验通过。
-- 提交：`__COMMIT__`
+- 提交：`f6f16ac（Release 0.1.2: add XLS auto_filter write/read support）`
 
 ### v0.1.1（2026-11-10）
 
