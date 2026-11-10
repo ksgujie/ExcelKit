@@ -212,6 +212,7 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
     csxf.set("fontId", "0")
     csxf.set("fillId", "0")
     csxf.set("borderId", "0")
+    csxf.set("xfId", "0")
 
     # cellXfs
     cell_xfs = ET.SubElement(root, _q("cellXfs"))
@@ -264,6 +265,22 @@ def _build_styles(styles_cache: dict, style_objects: dict) -> bytes:
             nf.set("formatCode", style.number_format)
             xf.set("numFmtId", str(164 + idx))
             xf.set("applyNumberFormat", "1")
+
+    # cellStyles (after cellXfs)
+    cell_styles = ET.SubElement(root, _q("cellStyles"))
+    cell_styles.set("count", "1")
+    cell_style = ET.SubElement(cell_styles, _q("cellStyle"))
+    cell_style.set("name", "Normal")
+    cell_style.set("xfId", "0")
+    cell_style.set("builtinId", "0")
+
+    # dxfs, tableStyles for better compatibility
+    dxfs = ET.SubElement(root, _q("dxfs"))
+    dxfs.set("count", "0")
+    table_styles = ET.SubElement(root, _q("tableStyles"))
+    table_styles.set("count", "0")
+    table_styles.set("defaultTableStyle", "TableStyleMedium2")
+    table_styles.set("defaultPivotStyle", "PivotStyleLight16")
 
     # numFmts must appear before fonts
     if num_fmts is not None:
@@ -410,7 +427,7 @@ def _build_pic(img, rid: str, pic_id: int) -> ET.Element:
     return pic
 
 
-def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: bool) -> bytes:
+def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: bool, is_active: bool = False) -> bytes:
     """生成单张工作表的 sheetN.xml 内容。"""
     root = ET.Element(_q("worksheet"))
 
@@ -443,16 +460,19 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
         dim = ET.SubElement(root, _q("dimension"))
         dim.set("ref", f"A1:{_cell_ref(max_r, max_c)}")
 
-    # 3. sheetViews（冻结窗格）
+
+    # 3. sheetViews（冻结窗格 + 默认视图，提升 WPS/Excel 兼容性）
     freeze = getattr(ws, "_freeze_panes", None)
+    views = ET.SubElement(root, _q("sheetViews"))
+    sv = ET.SubElement(views, _q("sheetView"))
+    sv.set("workbookViewId", "0")
+    if is_active:
+        sv.set("tabSelected", "1")
     if freeze:
         try:
             from excelkit.address import cell_to_index as _ci
             fr, fc = _ci(freeze)
             if fr > 0 or fc > 0:
-                views = ET.SubElement(root, _q("sheetViews"))
-                sv = ET.SubElement(views, _q("sheetView"))
-                sv.set("workbookViewId", "0")
                 pane = ET.SubElement(sv, _q("pane"))
                 if fc > 0:
                     pane.set("xSplit", str(fc))
@@ -468,7 +488,9 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
                 pane.set("state", "frozen")
         except Exception:
             pass
-
+    sel = ET.SubElement(sv, _q("selection"))
+    sel.set("activeCell", "A1")
+    sel.set("sqref", "A1")
     # 4. sheetFormatPr
     sheet_format = ET.SubElement(root, _q("sheetFormatPr"))
     sheet_format.set("defaultRowHeight", "15")
@@ -504,13 +526,13 @@ def _build_sheet_xml(ws, styles_cache: dict, style_objects: dict, has_drawing: b
                         ET.SubElement(c_el, _q("v")).text = str(val)
                     else:
                         c_el.set("t", "inlineStr")
-                        is_el = ET.SubElement(c_el, _q("inlineStr"))
+                        is_el = ET.SubElement(c_el, _q("is"))
                         t_el = ET.SubElement(is_el, _q("t"))
                         t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
                         t_el.text = _format_value(val)
                 else:
                     c_el.set("t", "inlineStr")
-                    is_el = ET.SubElement(c_el, _q("inlineStr"))
+                    is_el = ET.SubElement(c_el, _q("is"))
                     t_el = ET.SubElement(is_el, _q("t"))
                     t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
                     t_el.text = ""
@@ -575,7 +597,7 @@ def save_xlsx(workbook, filename: str, *, formulas: bool = False) -> None:
     # 生成 sheet xml
     sheets_xml = []
     for si, ws in enumerate(workbook.sheets):
-        sheets_xml.append((ws.name, _build_sheet_xml(ws, styles_cache, style_objects, sheet_has_drawing.get(si, False))))
+        sheets_xml.append((ws.name, _build_sheet_xml(ws, styles_cache, style_objects, sheet_has_drawing.get(si, False), is_active=(si == getattr(workbook, "_active_index", 0)))))
 
     styles_bytes = _build_styles(styles_cache, style_objects)
 
@@ -589,6 +611,8 @@ def save_xlsx(workbook, filename: str, *, formulas: bool = False) -> None:
         sheet_el.set("name", name)
         sheet_el.set("sheetId", str(i + 1))
         sheet_el.set(f"{{{_NS_R}}}id", f"rId{i + 1}")
+    calc_pr = ET.SubElement(wb_root, _q("calcPr"))
+    calc_pr.set("calcId", "171027")
     workbook_xml = ET.tostring(wb_root, encoding="utf-8", xml_declaration=True)
 
     # xl/_rels/workbook.xml.rels

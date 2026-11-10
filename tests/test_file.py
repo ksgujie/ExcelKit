@@ -106,5 +106,53 @@ class TestFileRoundTrip(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_xlsx_inline_string_uses_is_element(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "姓名"
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            with zipfile.ZipFile(path) as zf:
+                root = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
+            ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            cell = root.find(".//m:c[@r='A1']", ns)
+            self.assertIsNotNone(cell)
+            self.assertEqual(cell.get("t"), "inlineStr")
+            self.assertIsNotNone(cell.find("m:is", ns))
+            self.assertIsNone(cell.find("m:inlineStr", ns))
+            t_el = cell.find("m:is/m:t", ns)
+            self.assertIsNotNone(t_el)
+            self.assertEqual(t_el.text, "姓名")
+        finally:
+            os.unlink(path)
+
+    def test_xlsx_reader_supports_legacy_inline_str_element(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "旧格式"
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb.save(path)
+            # 模拟旧版本写出的 <inlineStr> 元素，验证读取端兼容
+            with zipfile.ZipFile(path) as zf:
+                sheet = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+            sheet = sheet.replace("<is>", "<inlineStr>").replace("</is>", "</inlineStr>")
+            tmp = path + ".tmp"
+            with zipfile.ZipFile(path) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+                for item in src.infolist():
+                    data = src.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet1.xml":
+                        data = sheet.encode("utf-8")
+                    dst.writestr(item, data)
+            os.replace(tmp, path)
+            wb2 = Workbook.load(path)
+            self.assertEqual(wb2.active["A1"].value, "旧格式")
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

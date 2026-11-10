@@ -316,7 +316,10 @@ def load_xlsx(filename: str) -> "Workbook":
                     if v is not None:
                         raw = v.text
                     if raw is None:
-                        is_el = cell.find(f"{_NS}inlineStr")
+                        # 标准 inline string 使用 <is>；兼容旧版本写出的 <inlineStr>
+                        is_el = cell.find(f"{_NS}is")
+                        if is_el is None:
+                            is_el = cell.find(f"{_NS}inlineStr")
                         if is_el is not None:
                             t_el = is_el.find(f"{_NS}t")
                             if t_el is not None:

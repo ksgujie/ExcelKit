@@ -1,6 +1,6 @@
 # ExcelKit 精简版整体情况概览
 
-> 最后更新：2026-11-10（API 重命名：`Workbook.sheet` → `get_sheet`，`Worksheet.export` → `export_csv`）
+> 最后更新：2026-11-10（API 重命名、XLSX inline string/兼容性修复）
 > 当前版本：v0.1.0（Git 版本管理）
 > 当前文件：`W:\ExcelKit\ExcelKit项目整体情况概览.md`
 > 项目根目录：`W:\ExcelKit\`
@@ -21,7 +21,7 @@
 | 图片（XLSX） | 已完成 | PNG/JPEG，`float/embed`，读写回环；XLS 写图抛 `UnsupportedFeatureError`；CSV/TSV 忽略 |
 | 追加/筛选 API | 已完成 | `append_rows(rows, *, on_mismatch="warn"|"error"|"ignore")`；`auto_filter.set/enable/apply(别名)/clear`（启用区域，不按条件隐藏行） |
 | API 重命名（本轮） | 已完成 | `Workbook.sheet(...)` → `get_sheet(...)`；`Worksheet.export(...)` → `export_csv(..., delimiter=",")` |
-| 文档与测试 | 已完成 | `README.md`、`ExcelKit_Usage_Guide.md`、本概览同步；全量 64 tests OK |
+| 文档与测试 | 已完成 | `README.md`、`ExcelKit_Usage_Guide.md`、本概览同步；全量 66 tests OK |
 
 ## 3. 关键 API 现状（节选）
 
@@ -34,13 +34,13 @@
 
 - 已推送：`d4d6478` `Fix XLSX styles/bookViews compatibility, append_rows on_mismatch, auto_filter.enable`
 - 历史：`6126d19` 地址转换重命名、`109f78b` writer 优化、`963c200` P1/P2/P3 修复等（详见 git log）。
-- 本轮待提交：`Workbook.get_sheet` / `Worksheet.export_csv` 重命名，文档/概览/测试同步，`.gitignore` 忽略 `build/`。
+- 本轮修复：XLSX 字符串单元格写出改为标准 `<is>` 元素（原先误写为 `<inlineStr>`，导致 Excel/WPS 显示为空）；读取端兼容 `<is>` 与旧版 `<inlineStr>`；补充 `sheetViews`、`calcPr`、`cellStyles` 等兼容性部件。
 - 全量验证命令：
   ```powershell
   cd W:\ExcelKit
   python -m unittest tests.test_address tests.test_workbook tests.test_cell tests.test_append tests.test_range tests.test_formula tests.test_file tests.test_style tests.test_template tests.test_image -v
   ```
-- 实际：**64 tests, OK**（退出码 0）。
+- 实际：**66 tests, OK**（退出码 0）。
 
 ## 5. 待办与注意事项
 
@@ -49,7 +49,8 @@
 - [ ] 文档可继续扩展为“每个 API 详细说明+范例”的完整手册。
 - [ ] `ET.register_namespace` 为 stdlib 进程级副作用，已集中注册并注释。
 - [ ] `append_rows` 默认 `on_mismatch="warn"` 允许参差行并 `UserWarning`；严格场景用 `on_mismatch="error"`。
-- [ ] `.gitignore` 已包含 `build/`（本轮提交纳入）。
+- [x] `.gitignore` 已包含 `build/`（本轮提交纳入）。
+- **XLSX 字符串单元格**：必须使用 `<c t="inlineStr"><is><t>...</t></is></c>`；旧版误写 `<inlineStr>` 会导致 Excel/WPS 显示空白（数字仍显示）。已修复并增加回归测试。
 
 ## 6. 给下一个 AI 账号的接续指令
 
